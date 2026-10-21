@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('api', {
   stdin: text => invoke('build:stdin', text),
   eof: () => invoke('build:eof'),
   installSdk: () => invoke('sdk:install'),
+  installToolchain: () => invoke('toolchain:install'),
+  checkUpdate: () => invoke('app:checkUpdate'),
   showSimulator: () => invoke('sim:show'),
 
   debugRequest: (command, args) => invoke('debug:request', command, args),

@@ -228,6 +228,7 @@
         <h1>WinSwift Studio</h1>
         <div class="welcome-tagline">Build iPhone apps in Swift &amp; SwiftUI on Windows 10 and 11</div>
         <div class="welcome-version" id="welcome-version">Version 1.0</div>
+        <div class="welcome-update" id="welcome-update" hidden></div>
         <div class="welcome-actions">
           <button data-action="new-project"><span data-icon="plusSquare"></span><div><b>Create New Project…</b><small>Create an iOS app or a command line tool</small></div></button>
           <button data-action="example"><span data-icon="sparkles"></span><div><b>Open Example Project…</b><small>A SwiftUI iPhone app to explore</small></div></button>
@@ -296,13 +297,14 @@
     <div class="sheet small">
       <div class="alert-icon"></div>
       <div class="sheet-title">Swift toolchain not found</div>
-      <p class="sheet-text">WinSwift Studio compiles your code with the official Swift toolchain for Windows. Install it from swift.org (it also needs Visual Studio Build Tools with the C++ workload and the Windows SDK), then press Retry.</p>
-      <p class="sheet-text mono">winget install --id Swift.Toolchain -e</p>
+      <p class="sheet-text">To build and run apps, WinSwift Studio needs the official <b>Swift for Windows</b> compiler and <b>Visual Studio Build Tools</b> (C++). Press <b>Install Swift…</b> — a window installs both with winget (Windows asks once for administrator approval for the Build Tools). When it finishes, press <b>Retry</b>.</p>
+      <p class="sheet-text">Kompilator Swift nie jest zainstalowany. Kliknij <b>Install Swift…</b>, poczekaj aż okno instalacji skończy, potem <b>Retry</b>.</p>
       <div class="sheet-buttons">
-        <button class="btn" id="tc-close">Close</button>
+        <button class="btn" id="tc-close">Later</button>
         <div class="spacer"></div>
-        <button class="btn" id="tc-download">Open swift.org</button>
-        <button class="btn primary" id="tc-retry">Retry</button>
+        <button class="btn" id="tc-download">swift.org</button>
+        <button class="btn" id="tc-retry">Retry</button>
+        <button class="btn primary" id="tc-install">Install Swift…</button>
       </div>
     </div>
   </div>

@@ -1,49 +1,114 @@
 {
   "name": "winswift-studio",
   "productName": "WinSwift Studio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Build iPhone apps in Swift and SwiftUI on Windows 10 and 11 - an Xcode-style IDE with an iPhone simulator, live previews and a debugger",
   "main": "main.js",
   "author": "BiNoX",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/CpMiko2005pl/winswift-studio.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CpMiko2005pl/winswift-studio.git"
+  },
   "homepage": "https://github.com/CpMiko2005pl/winswift-studio#readme",
-  "bugs": { "url": "https://github.com/CpMiko2005pl/winswift-studio/issues" },
+  "bugs": {
+    "url": "https://github.com/CpMiko2005pl/winswift-studio/issues"
+  },
   "scripts": {
     "start": "electron .",
     "icon": "electron scripts/make-icon.js",
     "package": "node scripts/package.js",
-    "dist": "electron-builder --win dir"
+    "installer": "electron-builder --win nsis --x64",
+    "release": "npm run installer && npm run package"
   },
-  "keywords": ["swift", "swiftui", "ios", "iphone", "xcode-alternative", "windows", "ide", "ios-simulator", "electron", "monaco-editor"],
+  "keywords": [
+    "swift",
+    "swiftui",
+    "ios",
+    "iphone",
+    "xcode-alternative",
+    "windows",
+    "ide",
+    "ios-simulator",
+    "electron",
+    "monaco-editor"
+  ],
   "build": {
     "appId": "local.swiftcode.ide",
     "productName": "WinSwift Studio",
+    "copyright": "MIT License — WinSwift Studio",
+    "asar": false,
+    "electronLanguages": [
+      "en-US",
+      "pl"
+    ],
     "directories": {
       "output": "dist"
     },
+    "afterPack": "scripts/after-pack.js",
     "files": [
       "main.js",
       "preload.js",
       "sim-preload.js",
       "buildtools.js",
+      "package.json",
+      "LICENSE",
       "runtime/**/*",
       "scripts/fetch-winsdk.js",
       "src/**/*",
       "build/icon.ico",
+      "build/icon.png",
+      "packaging/Zainstaluj-Swift-i-narzedzia.bat",
       "node_modules/monaco-editor/min/**/*",
+      "node_modules/monaco-editor/package.json",
+      "node_modules/monaco-editor/LICENSE",
       "node_modules/lucide-static/icons/**/*",
-      "node_modules/@fontsource/inter/**/*"
+      "node_modules/lucide-static/package.json",
+      "node_modules/lucide-static/LICENSE",
+      "node_modules/@fontsource/inter/**/*",
+      "!node_modules/monaco-editor/{esm,dev,min-maps}/**/*",
+      "!node_modules/lucide-static/{font,lib,dist}/**/*",
+      "!node_modules/lucide-static/{sprite.svg,tags.json,icon-nodes.json}"
     ],
     "win": {
       "icon": "build/icon.ico",
-      "target": "dir",
-      "signAndEditExecutable": true
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "WinSwift Studio",
+      "uninstallDisplayName": "WinSwift Studio",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "artifactName": "WinSwift-Studio-Setup-${version}.exe",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "multiLanguageInstaller": true,
+      "installerLanguages": [
+        "pl_PL",
+        "en_US"
+      ],
+      "language": "1045",
+      "license": "build/license.txt"
     }
   },
   "devDependencies": {
     "electron": "^33.2.1",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "^26.15.3",
     "rcedit": "^4.0.1"
   },
   "dependencies": {

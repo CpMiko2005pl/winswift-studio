@@ -30,6 +30,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  $l.Description = 'WinSwift Studio - aplikacje na iPhone w Swift na Windows'; $l.Save() }"
 
 echo Gotowe! Skroty "WinSwift Studio" sa na pulpicie i w menu Start.
+echo Odinstalowanie: "%DEST%\Odinstaluj.bat"
 echo.
 where swift >nul 2>&1
 if errorlevel 1 (

@@ -567,6 +567,9 @@ input, select { font: inherit; color: var(--text); }
 .welcome-actions button > span .ico { width: 22px; height: 22px; color: var(--text-2); }
 .welcome-actions b { display: block; font-weight: 600; font-size: 13px; }
 .welcome-actions small { color: var(--text-3); font-size: 11.5px; }
+.welcome-update { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 10px; border-radius: 12px; font-size: 12px; background: rgba(10, 132, 255, .16); color: var(--text); cursor: pointer; }
+.welcome-update .ico { width: 13px; height: 13px; color: var(--accent); }
+.welcome-update a { color: var(--accent); font-weight: 600; }
 .welcome-tagline { margin-top: 4px; font-size: 13px; color: var(--text-2); text-align: center; }
 /* sponsor card (welcome window and About) */
 .sponsor {

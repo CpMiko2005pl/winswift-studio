@@ -13,6 +13,14 @@ sami zgłoszą się z ceną. https://prozlecenie.pl/
  1. INSTALACJA (2 minuty)
 ---------------------------------------------------------------------
 
+ NAJPROŚCIEJ: zamiast tego ZIP-a pobierz z GitHuba instalator
+ WinSwift-Studio-Setup-<wersja>.exe i kliknij Dalej → Zainstaluj.
+ Ta paczka ZIP to wersja przenośna — instrukcja poniżej.
+
+ 0) Przed rozpakowaniem: prawy przycisk na pliku ZIP → Właściwości →
+    zaznacz "Odblokuj" (na dole) → OK. Windows nie będzie wtedy
+    blokował programu.
+
  a) Rozpakuj całe archiwum ZIP (prawy przycisk → "Wyodrębnij wszystkie").
     Nie uruchamiaj niczego bezpośrednio z podglądu ZIP-a.
 
@@ -34,7 +42,9 @@ sami zgłoszą się z ceną. https://prozlecenie.pl/
  2. KOMPILATOR SWIFT (jednorazowo, potrzebny do uruchamiania kodu)
 ---------------------------------------------------------------------
 
- Kliknij dwa razy "Zainstaluj-Swift-i-narzedzia.bat". Instaluje on:
+ Program sam to zaproponuje przy pierwszym uruchomieniu: przycisk
+ "Install Swift…" (albo menu Help → Install Swift Toolchain…).
+ Możesz też kliknąć dwa razy "Zainstaluj-Swift-i-narzedzia.bat". Instaluje on:
    - Swift dla Windows (bez administratora),
    - Visual Studio Build Tools 2022 z C++ (Windows zapyta o zgodę
      administratora — to wymaganie kompilatora Swift na Windows).
@@ -91,7 +101,24 @@ sami zgłoszą się z ceną. https://prozlecenie.pl/
 
 
 ---------------------------------------------------------------------
- 6. OGRANICZENIA (uczciwie)
+ 6. AKTUALIZACJE I ODINSTALOWANIE
+---------------------------------------------------------------------
+
+ - Program sam sprawdza nowe wersje (Help → Check for Updates…).
+   Nowy instalator po prostu instaluje się na starą wersję —
+   projekty i ustawienia zostają.
+ - Odinstalowanie:
+     * instalator Setup.exe → Ustawienia → Aplikacje → Zainstalowane
+       aplikacje → WinSwift Studio → Odinstaluj,
+     * wersja z ZIP-a (Zainstaluj.bat) → uruchom
+       %LOCALAPPDATA%\Programs\WinSwift Studio\Odinstaluj.bat,
+     * uruchamiana bez instalacji → po prostu usuń folder.
+ - Twoje projekty nigdy nie są usuwane. Kompilator Swift i Build Tools
+   odinstalujesz osobno w Ustawienia → Aplikacje.
+
+
+---------------------------------------------------------------------
+ 7. OGRANICZENIA (uczciwie)
 ---------------------------------------------------------------------
 
  - Aplikacje działają w symulatorze na Windows (nasza implementacja

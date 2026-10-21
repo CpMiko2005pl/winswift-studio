@@ -2305,6 +2305,30 @@ function registerIpc() {
   ipcMain.handle('app:devtools', () => win.webContents.toggleDevTools());
   ipcMain.handle('app:fullscreen', () => win.setFullScreen(!win.isFullScreen()));
   ipcMain.handle('app:version', () => app.getVersion());
+  // the Swift toolchain + VS Build Tools installer script (winget) in its own console window
+  ipcMain.handle('toolchain:install', async () => {
+    const bat = path.join(__dirname, 'packaging', 'Zainstaluj-Swift-i-narzedzia.bat');
+    if (!fs.existsSync(bat)) { shell.openExternal('https://www.swift.org/install/windows/'); return false; }
+    return (await shell.openPath(bat)) === '';
+  });
+  // Help ▸ Check for Updates: the newest release on GitHub
+  ipcMain.handle('app:checkUpdate', () => new Promise(resolve => {
+    const req = https.get('https://api.github.com/repos/CpMiko2005pl/winswift-studio/releases/latest',
+      { headers: { 'User-Agent': 'WinSwift-Studio', Accept: 'application/vnd.github+json' }, timeout: 8000 }, res => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', d => { body += d; });
+        res.on('end', () => {
+          try {
+            const j = JSON.parse(body);
+            const setup = (j.assets || []).find(a => /setup.*\.exe$/i.test(a.name));
+            resolve({ current: app.getVersion(), latest: String(j.tag_name || '').replace(/^v/i, ''), url: j.html_url, setup: setup?.browser_download_url || null, notes: j.name || '' });
+          } catch { resolve(null); }
+        });
+      });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(null));
+  }));
   ipcMain.handle('app:initialPath', () => {
     const p = initialPath();
     if (!p) return null;

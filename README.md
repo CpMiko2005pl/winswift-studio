@@ -17,16 +17,17 @@ Sponsor: <a href="https://prozlecenie.pl/"><b>ProZlecenie.pl</b></a> — zleceni
 
 <p align="center"><img src="docs/screenshots/canvas.png" width="860" alt="Edytor SwiftUI z podglądem Canvas"></p>
 
-## Pobierz i uruchom
+## Instalacja — 3 kroki
 
-1. Pobierz **[WinSwift-Studio-Windows-x64.zip](https://github.com/CpMiko2005pl/winswift-studio/releases/latest)** (sekcja *Releases*).
-2. Rozpakuj całość i kliknij **`Zainstaluj.bat`** — program trafi do Twojego profilu i doda skróty na pulpicie i w menu Start (bez administratora). Możesz też po prostu uruchomić `WinSwift Studio.exe`.
-3. Jednorazowo zainstaluj kompilator: **`Zainstaluj-Swift-i-narzedzia.bat`** (Swift dla Windows + Visual Studio Build Tools z C++).
-4. *Create New Project… → iOS → App* i **Ctrl+R** — aplikacja uruchomi się w symulatorze iPhone'a.
-
-Pełna instrukcja jest w paczce (`INSTRUKCJA.txt`, po angielsku `README-EN.txt`).
+1. Pobierz instalator **[WinSwift-Studio-Setup.exe](https://github.com/CpMiko2005pl/winswift-studio/releases/latest)** (sekcja *Releases → Assets*), uruchom go i kliknij **Dalej → Zainstaluj**. Bez uprawnień administratora; skróty pojawią się na pulpicie i w menu Start.
+2. Przy pierwszym uruchomieniu kliknij **Install Swift…** — program sam zainstaluje kompilator Swift i Visual Studio Build Tools (przez winget; Windows raz zapyta o zgodę administratora). Gdy skończy, kliknij **Retry**.
+3. *Create New Project… → iOS → App* i **Ctrl+R** — aplikacja uruchomi się w symulatorze iPhone'a (pierwsze uruchomienie buduje bibliotekę SwiftUI, ok. 1–2 min).
 
 > Windows pokazuje „System Windows ochronił ten komputer”? Kliknij **Więcej informacji → Uruchom mimo to** — program jest darmowy i nie ma płatnego podpisu cyfrowego.
+
+**Aktualizacje:** program sam sprawdza nowe wersje (*Help → Check for Updates…*); nowy instalator instaluje się na starą wersję, projekty i ustawienia zostają.
+**Odinstalowanie:** *Ustawienia → Aplikacje → Zainstalowane aplikacje → WinSwift Studio → Odinstaluj* (Twoje projekty nie są usuwane).
+**Wersja przenośna:** w *Releases* jest też `WinSwift-Studio-…-Windows-x64.zip` — rozpakuj i uruchom `WinSwift Studio.exe` albo `Zainstaluj.bat` (instrukcja w `INSTRUKCJA.txt`, odinstalowanie przez `Odinstaluj.bat`).
 
 ## Co potrafi
 
@@ -51,7 +52,8 @@ git clone https://github.com/CpMiko2005pl/winswift-studio.git
 cd winswift-studio
 npm install
 npm start           & rem uruchomienie
-npm run package     & rem paczka dist\WinSwift-Studio-*-Windows-x64.zip
+npm run installer   & rem instalator dist\WinSwift-Studio-Setup-*.exe
+npm run package     & rem wersja przenośna dist\WinSwift-Studio-*-Windows-x64.zip
 ```
 
 Wymagania: Node.js 18+, Swift dla Windows, Visual Studio Build Tools z C++.
@@ -70,7 +72,7 @@ Projekt nie jest powiązany z Apple Inc. ani przez nią wspierany. Xcode, Swift,
 
 ### English
 
-**WinSwift Studio** lets you write iPhone apps in **Swift and SwiftUI on Windows 10/11**: an Xcode-style IDE with an **iPhone simulator**, **live SwiftUI previews (Canvas)**, an **LLDB debugger** and **SourceKit code completion**. Download the ZIP from *Releases*, run `Zainstaluj.bat`, install Swift + Visual Studio Build Tools once (`Zainstaluj-Swift-i-narzedzia.bat`), then *Create New Project → iOS → App* and press Ctrl+R.
+**WinSwift Studio** lets you write iPhone apps in **Swift and SwiftUI on Windows 10/11**: an Xcode-style IDE with an **iPhone simulator**, **live SwiftUI previews (Canvas)**, an **LLDB debugger** and **SourceKit code completion**. Download `WinSwift-Studio-Setup.exe` from *Releases* and install it (no admin needed); on first launch click **Install Swift…** to get the Swift toolchain and Visual Studio Build Tools via winget, then *Create New Project → iOS → App* and press Ctrl+R. The app checks GitHub for updates; uninstall from *Settings → Apps*.
 Apps run on Windows through an open reimplementation of the SwiftUI API; building `.ipa` files or publishing to the App Store still needs a Mac with Xcode. Not affiliated with Apple Inc.
 
 <sub>Keywords: swift on windows, swiftui on windows, xcode for windows alternative, ios development on windows, iphone app development windows, ios simulator for windows, learn swift windows, programowanie iOS na Windows, aplikacje na iPhone'a na Windows, Swift na Windows</sub>

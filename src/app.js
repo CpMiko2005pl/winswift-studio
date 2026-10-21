@@ -1753,6 +1753,50 @@ $('#tc-retry').onclick = async () => {
   if (S.toolchain.found) { hideOverlay('toolchain-sheet'); toast(`Found Swift ${S.toolchain.version}`); setStatus(S.root ? 'ready' : 'none'); }
   else toast('Still no Swift toolchain on PATH');
 };
+$('#tc-install').onclick = async () => {
+  const ok = await api.installToolchain();
+  toast(ok ? 'The installer window is open — press Retry when it finishes' : 'Opened swift.org', 5000);
+  // keep checking while the installer runs, like Xcode's "Downloading components"
+  clearInterval(S.tcPoll);
+  let n = 0;
+  S.tcPoll = setInterval(async () => {
+    if (++n > 180) { clearInterval(S.tcPoll); return; }
+    const tc = await api.toolchain(true);
+    if (tc.found) {
+      clearInterval(S.tcPoll);
+      await updateToolchainLabel(true);
+      hideOverlay('toolchain-sheet');
+      toast(`Swift ${tc.version} is ready — press Ctrl+R to run`, 5000);
+      setStatus(S.root ? 'ready' : 'none');
+    }
+  }, 10000);
+};
+
+// ======================================================================== updates (GitHub releases)
+
+const newerVersion = (a, b) => {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0); }
+  return false;
+};
+async function checkForUpdates(manual) {
+  const u = await api.checkUpdate();
+  if (!u || !u.latest) { if (manual) toast('Could not reach GitHub — check your internet connection'); return; }
+  if (!newerVersion(u.latest, u.current)) { if (manual) toast(`WinSwift Studio ${u.current} is up to date`); S.update = null; renderUpdateBanner(); return; }
+  S.update = u;
+  renderUpdateBanner();
+  if (manual) {
+    const r = await api.confirm(`WinSwift Studio ${u.latest} is available`, `You have ${u.current}. Download the installer and run it — your projects and settings stay.`, ['Download', 'Later']);
+    if (r === 0) api.openExternal(u.setup || u.url);
+  } else toast(`New version ${u.latest} available — Help ▸ Check for Updates…`, 6000);
+}
+function renderUpdateBanner() {
+  const el = $('#welcome-update');
+  if (!el) return;
+  el.hidden = !S.update;
+  if (S.update) el.innerHTML = `${icon('sparkles')} WinSwift Studio ${esc(S.update.latest)} is available — <a>Download</a>`;
+}
+$('#welcome-update').addEventListener('click', () => { if (S.update) api.openExternal(S.update.setup || S.update.url); });
 
 // --- new project sheet
 const TEMPLATES = {
@@ -2422,6 +2466,9 @@ function menuTemplate(name) {
       { type: 'separator' },
       { id: 'help-keys', label: 'Keyboard Shortcuts' },
       { type: 'separator' },
+      { id: 'check-updates', label: S.update ? `Update Available: ${S.update.latest}…` : 'Check for Updates…' },
+      { id: 'install-swift', label: 'Install Swift Toolchain…' },
+      { type: 'separator' },
       { id: 'sponsor', label: 'ProZlecenie.pl — fachowcy z Twojej okolicy (sponsor)' },
       { id: 'about', label: 'About WinSwift Studio' },
     ],
@@ -2588,6 +2635,8 @@ const COMMANDS = {
   'help-stdlib': () => api.openExternal('https://developer.apple.com/documentation/swift/swift-standard-library'),
   'help-keys': showShortcuts,
   'sponsor': () => api.openExternal('https://prozlecenie.pl/'),
+  'check-updates': () => checkForUpdates(true),
+  'install-swift': () => showOverlay('toolchain-sheet'),
   'about': cmdAbout,
 };
 
@@ -2735,5 +2784,11 @@ async function init() {
   setInterval(() => api.setState({ lastOpen: !!S.root }), 5000);
   // test hook: SWIFTCODE_DEBUG=1 + SWIFTCODE_SCRIPT="<js>" runs a script once the UI is up
   const script = await api.debugScript();
+  if (!script) {
+    // first run on a new PC: offer to install Swift right away; then look for a newer release
+    const tc = await api.toolchain();
+    if (!tc.found) setTimeout(() => showOverlay('toolchain-sheet'), 600);
+    setTimeout(() => checkForUpdates(false), 4000);
+  }
   if (script) setTimeout(() => { try { (0, eval)(script); } catch (e) { console.error(e); } }, 800);
 }

@@ -2,29 +2,28 @@
   WinSwift Studio — aplikacje na iPhone'a w Swift i SwiftUI na Windows
 =====================================================================
 
-IDE w stylu Xcode dla Windows 10 i 11: edytor z podpowiedziami,
-symulator iPhone'a, podgląd na żywo (Canvas) i debugger.
+IDE do Swift/SwiftUI dla Windows 10 i 11: edytor z podpowiedziami,
+symulator interfejsu iPhone'a, podgląd na żywo (Canvas) i debugger.
 
 Sponsor: ProZlecenie.pl — zlecenia budowlane, fachowcy z Twojej okolicy
 sami zgłoszą się z ceną. https://prozlecenie.pl/
+Bezpieczeństwo aplikacji: cyberscope.pl. https://cyberscope.pl/
 
 
 ---------------------------------------------------------------------
  1. INSTALACJA (2 minuty)
 ---------------------------------------------------------------------
 
- a) Rozpakuj całe archiwum ZIP (prawy przycisk → "Wyodrębnij wszystkie").
-    Nie uruchamiaj niczego bezpośrednio z podglądu ZIP-a.
+ a) Zalecana instalacja: pobierz i uruchom
+    "WinSwift-Studio-Setup-...-x64.exe" z sekcji Releases.
+    Kreator instaluje aplikację dla bieżącego użytkownika, pozwala wybrać
+    folder, tworzy skróty Start/pulpit i nie wymaga administratora.
 
- b) Kliknij dwa razy "Zainstaluj.bat".
-    Program skopiuje się do  %LOCALAPPDATA%\Programs\WinSwift Studio
-    i doda skróty "WinSwift Studio" na pulpicie i w menu Start.
-    (Nie potrzeba uprawnień administratora.)
+    Wersja portable: pobierz i rozpakuj ZIP, a następnie uruchom
+    "WinSwift Studio.exe". Opcjonalny "Zainstaluj.bat" kopiuje wersję
+    portable do profilu i tworzy skróty. Nie uruchamiaj plików z podglądu ZIP.
 
-    Możesz też pominąć instalację i po prostu uruchomić
-    "WinSwift Studio.exe" z rozpakowanego folderu.
-
- c) Jeśli Windows pokaże "System Windows ochronił ten komputer":
+ b) Jeśli Windows pokaże "System Windows ochronił ten komputer":
     kliknij "Więcej informacji" → "Uruchom mimo to".
     (Program nie ma płatnego podpisu cyfrowego — to normalne dla
     darmowych projektów open source.)
@@ -34,7 +33,9 @@ sami zgłoszą się z ceną. https://prozlecenie.pl/
  2. KOMPILATOR SWIFT (jednorazowo, potrzebny do uruchamiania kodu)
 ---------------------------------------------------------------------
 
- Kliknij dwa razy "Zainstaluj-Swift-i-narzedzia.bat". Instaluje on:
+ Instalator IDE nie zawiera kompilatora Swift ani Visual Studio.
+ Aby kompilować i uruchamiać kod, kliknij "Zainstaluj-Swift-i-narzedzia.bat"
+ z paczki ZIP. Instaluje on:
    - Swift dla Windows (bez administratora),
    - Visual Studio Build Tools 2022 z C++ (Windows zapyta o zgodę
      administratora — to wymaganie kompilatora Swift na Windows).
@@ -65,7 +66,7 @@ sami zgłoszą się z ceną. https://prozlecenie.pl/
 
 
 ---------------------------------------------------------------------
- 4. NAJWAŻNIEJSZE SKRÓTY (jak w Xcode, Cmd → Ctrl)
+ 4. NAJWAŻNIEJSZE SKRÓTY (Cmd zastępuje Ctrl)
 ---------------------------------------------------------------------
 
  Ctrl+R            Run                     Ctrl+.          Stop

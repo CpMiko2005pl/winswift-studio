@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Simulator</title>
+  <link rel="stylesheet" href="../node_modules/@fontsource/inter/400.css">
+  <link rel="stylesheet" href="../node_modules/@fontsource/inter/500.css">
+  <link rel="stylesheet" href="../node_modules/@fontsource/inter/600.css">
+  <link rel="stylesheet" href="../node_modules/@fontsource/inter/700.css">
+  <link rel="stylesheet" href="../node_modules/@fontsource/inter/800.css">
+  <link rel="stylesheet" href="simulator.css">
+</head>
+<body>
+  <div id="chrome">
+    <div class="lights">
+      <button id="sim-close" title="Close"></button>
+      <button id="sim-min" title="Minimize"></button>
+      <button class="dim"></button>
+    </div>
+    <div class="sim-title"><b id="sim-device">iPhone 16 Pro</b><span id="sim-os">iOS 18.0</span></div>
+    <div class="sim-tools">
+      <button id="sim-home" title="Home (Ctrl+Shift+H)"><svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="3"/></svg></button>
+      <button id="sim-shot" title="Save Screenshot to Desktop (Ctrl+S)"><svg viewBox="0 0 16 16"><path d="M2.5 5.5a1 1 0 0 1 1-1h1.8l1-1.5h3.4l1 1.5h1.8a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/><circle cx="8" cy="8.3" r="2.2"/></svg></button>
+      <button id="sim-theme" title="Toggle Appearance (Ctrl+Shift+A)"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 0 0 11z" fill="currentColor"/></svg></button>
+      <button id="sim-shake" title="Shake (Ctrl+Alt+Z)"><svg viewBox="0 0 16 16"><rect x="5" y="2.5" width="6" height="11" rx="1.4"/><path d="M2.5 5.5 1.5 8l1 2.5M13.5 5.5l1 2.5-1 2.5"/></svg></button>
+      <button id="sim-menu" title="Device, Features (Location) and Language"><svg viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></svg></button>
+    </div>
+  </div>
+  <div id="stage">
+    <div id="device">
+      <div id="bezel">
+        <div id="screen" class="light">
+          <div id="statusbar">
+            <span id="clock">9:41</span><svg id="loc-arrow" viewBox="0 0 12 12"><path d="M11 1 1 5.2l4.4 1.4L6.8 11z"/></svg>
+            <div class="island"></div>
+            <span class="sb-right">
+              <svg viewBox="0 0 18 12" class="sig"><rect x="0" y="8" width="3" height="4" rx=".7"/><rect x="5" y="5.5" width="3" height="6.5" rx=".7"/><rect x="10" y="3" width="3" height="9" rx=".7"/><rect x="15" y="0" width="3" height="12" rx=".7"/></svg>
+              <svg viewBox="0 0 16 12" class="wifi"><path d="M8 11.3 5.6 8.9a3.4 3.4 0 0 1 4.8 0zM3.5 6.8l-1.4-1.4a8.3 8.3 0 0 1 11.8 0l-1.4 1.4a6.3 6.3 0 0 0-9 0zM.7 4 0 3.3a11.3 11.3 0 0 1 16 0L15.3 4a10.3 10.3 0 0 0-14.6 0z"/></svg>
+              <svg viewBox="0 0 27 13" class="batt"><rect x=".5" y=".5" width="23" height="12" rx="3.5" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="20" height="9" rx="2"/><path d="M25 4.5v4a2 2 0 0 0 0-4z" opacity=".4"/></svg>
+            </span>
+          </div>
+          <div id="app-root"></div>
+          <div id="home-screen"></div>
+          <div id="settings-app"></div>
+          <div id="overlay-root"></div>
+          <div id="system-root"></div>
+          <div id="home-indicator"></div>
+        </div>
+        <div class="home-btn" id="home-btn" title="Home"></div>
+      </div>
+      <div class="btn side-l1"></div><div class="btn side-l2"></div><div class="btn side-l3"></div><div class="btn side-r"></div>
+    </div>
+  </div>
+  <div id="sim-toast"></div>
+  <script src="canvas-shim.js"></script>
+  <script src="sf-symbols.js"></script>
+  <script src="simulator.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# dependencies and build output
+node_modules/
+dist/
+out/
+
+# Swift build folders of projects opened inside the repo
+.build/
+.swiftpm/
+
+# editors / OS
+.vscode/
+.idea/
+.vs/
+Thumbs.db
+desktop.ini
+*.log
+*.restored

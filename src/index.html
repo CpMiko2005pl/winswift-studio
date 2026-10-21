@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WinSwift Studio</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" data-name="vs/editor/editor.main" href="../node_modules/monaco-editor/min/vs/editor/editor.main.css">
+</head>
+<body>
+<div id="app" class="no-project">
+
+  <!-- ===================== toolbar ===================== -->
+  <header id="toolbar">
+    <div class="tb-left">
+      <div class="app-glyph" title="WinSwift Studio"></div>
+      <nav id="menubar">
+        <span data-menu="file">File</span><span data-menu="edit">Edit</span><span data-menu="view">View</span><span data-menu="find">Find</span><span data-menu="navigate">Navigate</span><span data-menu="editor">Editor</span><span data-menu="product">Product</span><span data-menu="debug">Debug</span><span data-menu="window">Window</span><span data-menu="help">Help</span>
+      </nav>
+      <button class="tb-btn" id="btn-nav" data-icon="sidebarLeft" title="Hide or show the Navigator (Ctrl+0)"></button>
+      <div class="tb-sep"></div>
+      <button class="tb-btn" id="btn-stop" data-icon="stop" title="Stop the running scheme (Ctrl+.)" disabled></button>
+      <button class="tb-btn run" id="btn-run" data-icon="play" title="Build and run the current scheme (Ctrl+R)"></button>
+      <div class="tb-project">
+        <div class="tb-project-name" id="tb-project-name">WinSwift Studio</div>
+        <div class="tb-project-sub" id="tb-project-sub">No Project</div>
+      </div>
+    </div>
+
+    <div class="tb-center">
+      <div class="activity" id="activity">
+        <button class="scheme" id="scheme" title="Scheme">
+          <span class="scheme-icon" data-icon="terminalApp"></span>
+          <span id="scheme-name">No Scheme</span>
+          <span class="chev">›</span>
+          <span class="scheme-icon" id="scheme-device-icon" data-icon="pc"></span>
+          <span id="scheme-device">My PC</span>
+        </button>
+        <div class="activity-status">
+          <span id="act-text">WinSwift Studio</span>
+          <span id="act-time" class="act-time"></span>
+          <span id="act-bg" class="act-bg"></span>
+          <span id="act-issues" class="act-issues"></span>
+        </div>
+        <div class="act-progress" id="act-progress"><div></div></div>
+      </div>
+    </div>
+
+    <div class="tb-right">
+      <button class="tb-btn" id="btn-library" data-icon="plus" title="Library (Ctrl+Shift+L)"></button>
+      <button class="tb-btn" id="btn-insp" data-icon="sidebarRight" title="Hide or show the Inspectors (Ctrl+Alt+0)"></button>
+    </div>
+  </header>
+
+  <!-- ===================== workspace ===================== -->
+  <main id="workspace">
+    <aside id="navigator">
+      <div class="nav-tabs" id="nav-tabs">
+        <button data-nav="project" data-icon="folder" title="Project Navigator (Ctrl+1)" class="active"></button>
+        <button data-nav="symbols" data-icon="symbols" title="Symbol Navigator (Ctrl+3)"></button>
+        <button data-nav="find" data-icon="search" title="Find Navigator (Ctrl+4)"></button>
+        <button data-nav="issues" data-icon="warning" title="Issue Navigator (Ctrl+5)"></button>
+        <button data-nav="debug" data-icon="debugNav" title="Debug Navigator (Ctrl+7)"></button>
+        <button data-nav="breakpoints" data-icon="breakpointsNav" title="Breakpoint Navigator (Ctrl+8)"></button>
+        <button data-nav="reports" data-icon="report" title="Report Navigator (Ctrl+9)"></button>
+        <button data-nav="bookmarks" data-icon="bookmark" title="Bookmark Navigator (Ctrl+2)"></button>
+      </div>
+
+      <div class="nav-panel active" data-panel="project">
+        <div class="tree" id="tree" tabindex="0"></div>
+      </div>
+
+      <div class="nav-panel" data-panel="symbols">
+        <div class="symbol-list" id="symbol-list"></div>
+      </div>
+
+      <div class="nav-panel" data-panel="find">
+        <div class="find-head">
+          <div class="find-mode"><span class="fm-pick" id="find-mode-op">Find</span> <span class="chev">›</span> Text <span class="chev">›</span> <span class="fm-pick" id="find-mode-match">Containing</span></div>
+          <div class="find-input-wrap">
+            <span data-icon="search" class="find-ico"></span>
+            <input id="find-input" placeholder="Search in project" spellcheck="false">
+          </div>
+          <div class="find-input-wrap" id="replace-wrap" hidden>
+            <span data-icon="replace" class="find-ico"></span>
+            <input id="replace-input" placeholder="Replace with" spellcheck="false">
+          </div>
+          <div class="replace-row" id="replace-row" hidden><button class="btn small" id="replace-all" disabled>Replace All</button></div>
+          <div class="find-opts">
+            <label><input type="checkbox" id="find-case"> Match Case</label>
+            <label><input type="checkbox" id="find-word"> Whole Word</label>
+            <label><input type="checkbox" id="find-regex"> Regex</label>
+          </div>
+          <div class="find-summary" id="find-summary"></div>
+        </div>
+        <div class="find-results" id="find-results"></div>
+      </div>
+
+      <div class="nav-panel" data-panel="issues">
+        <div class="issues-head" id="issues-head">Buildtime</div>
+        <div class="issue-list" id="issue-list"></div>
+      </div>
+
+      <div class="nav-panel" data-panel="debug">
+        <div class="symbol-list" id="debug-nav"></div>
+      </div>
+
+      <div class="nav-panel" data-panel="breakpoints">
+        <div class="symbol-list" id="bp-nav"></div>
+      </div>
+
+      <div class="nav-panel" data-panel="reports">
+        <div class="report-list" id="report-list"></div>
+      </div>
+
+      <div class="nav-panel" data-panel="bookmarks">
+        <div class="symbol-list" id="bookmark-list"></div>
+      </div>
+
+      <div class="nav-filter">
+        <button class="mini-btn" id="nav-add" data-icon="plus" title="Add files"></button>
+        <div class="filter-box">
+          <span data-icon="filter" class="filter-ico"></span>
+          <input id="nav-filter" placeholder="Filter" spellcheck="false">
+        </div>
+      </div>
+    </aside>
+
+    <div class="splitter v" id="split-nav"></div>
+
+    <section id="center">
+      <div id="tabbar"></div>
+      <div id="jumpbar">
+        <div class="jb-nav">
+          <button class="mini-btn" id="jb-back" data-icon="chevronLeft" title="Go back"></button>
+          <button class="mini-btn" id="jb-fwd" data-icon="chevronRight" title="Go forward"></button>
+        </div>
+        <div class="jb-path" id="jb-path"></div>
+        <div class="jb-right">
+          <button class="mini-btn" id="jb-opts" data-icon="editorOptions" title="Adjust Editor Options"></button>
+        </div>
+      </div>
+      <div id="editor-row">
+        <div id="editor-host">
+          <div id="editor"></div>
+          <div id="custom-editor"></div>
+          <div id="no-editor">No Editor</div>
+        </div>
+        <div class="splitter v" id="split-canvas"></div>
+        <div id="canvas">
+          <div class="cv-head">
+            <div class="cv-tabs" id="cv-tabs"></div>
+            <button class="mini-btn" id="cv-pin" data-icon="pin" title="Pin this preview while you edit other files"></button>
+            <button class="mini-btn" id="cv-close" data-icon="close" title="Hide Canvas (Ctrl+Alt+Enter)"></button>
+          </div>
+          <div class="cv-body" id="cv-body">
+            <iframe id="cv-frame" src="simulator.html?canvas=1" title="Preview"></iframe>
+            <div class="cv-progress" id="cv-progress"><div></div></div>
+            <div class="cv-status" id="cv-status"></div>
+          </div>
+          <div class="cv-foot">
+            <button class="cv-seg on" id="cv-live" data-icon="play" title="Live — interact with the preview"></button>
+            <div class="tb-sep small"></div>
+            <button class="cv-btn" id="cv-device" title="Canvas Device Settings"><span data-icon="iphone"></span><span>iPhone 16 Pro</span></button>
+            <button class="cv-btn" id="cv-scheme" data-icon="appearance" title="Color Scheme"></button>
+            <div class="spacer"></div>
+            <span class="cv-time" id="cv-time"></span>
+            <button class="cv-btn" id="cv-refresh" data-icon="refresh" title="Refresh Canvas (Ctrl+Alt+P)"></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="splitter h" id="split-debug"></div>
+
+      <div id="debug">
+        <div class="debug-bar">
+          <button class="mini-btn" id="dbg-toggle" data-icon="panelDown" title="Hide the Debug Area (Ctrl+Shift+Y)"></button>
+          <div class="tb-sep small"></div>
+          <button class="mini-btn dbg-bp active" id="dbg-bp" data-icon="breakpoint" title="Deactivate Breakpoints (Ctrl+Alt+B)"></button>
+          <button class="mini-btn" id="dbg-pause" data-icon="pause" disabled title="Pause program execution (Ctrl+Alt+Y)"></button>
+          <button class="mini-btn" id="dbg-over" data-icon="stepOver" disabled title="Step over (F6)"></button>
+          <button class="mini-btn" id="dbg-in" data-icon="stepIn" disabled title="Step into (F7)"></button>
+          <button class="mini-btn" id="dbg-out" data-icon="stepOut" disabled title="Step out (F8)"></button>
+          <div class="dbg-process" id="dbg-process"></div>
+        </div>
+        <div class="debug-body">
+          <div id="variables">
+            <div class="var-tree" id="var-tree"><div class="placeholder">No Variables</div></div>
+            <div class="var-foot">
+              <span>Auto</span><span class="chev">⌄</span>
+              <div class="filter-box small"><span data-icon="filter" class="filter-ico"></span><input id="var-filter" placeholder="Filter" spellcheck="false"></div>
+            </div>
+          </div>
+          <div class="splitter v" id="split-vars"></div>
+          <div id="console">
+            <div id="console-out" tabindex="0"></div>
+            <div class="console-in-row" id="console-in-row">
+              <span class="console-prompt">›</span>
+              <input id="console-in" placeholder="Type input for the running program and press Enter" spellcheck="false">
+            </div>
+            <div class="console-foot">
+              <span>All Output</span><span class="chev">⌄</span>
+              <div class="filter-box small"><span data-icon="filter" class="filter-ico"></span><input id="console-filter" placeholder="Filter" spellcheck="false"></div>
+              <button class="mini-btn" id="console-clear" data-icon="trash" title="Clear console (Ctrl+K)"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="splitter v" id="split-insp"></div>
+
+    <aside id="inspector">
+      <div class="insp-tabs" id="insp-tabs">
+        <button data-insp="file" data-icon="doc" class="active" title="File Inspector"></button>
+        <button data-insp="help" data-icon="help" title="Quick Help Inspector"></button>
+      </div>
+      <div class="insp-panel active" data-insp-panel="file" id="insp-file"></div>
+      <div class="insp-panel" data-insp-panel="help" id="insp-help"></div>
+    </aside>
+  </main>
+
+  <!-- ===================== sheets & overlays ===================== -->
+  <div class="overlay" id="welcome">
+    <div class="welcome">
+      <div class="welcome-left">
+        <button class="welcome-close" id="welcome-close" data-icon="close" title="Close"></button>
+        <div class="welcome-icon"></div>
+        <h1>WinSwift Studio</h1>
+        <div class="welcome-tagline">Build iPhone apps in Swift &amp; SwiftUI on Windows 10 and 11</div>
+        <div class="welcome-version" id="welcome-version">Version 1.0</div>
+        <div class="welcome-actions">
+          <button data-action="new-project"><span data-icon="plusSquare"></span><div><b>Create New Project…</b><small>Create an iOS app or a command line tool</small></div></button>
+          <button data-action="example"><span data-icon="sparkles"></span><div><b>Open Example Project…</b><small>A SwiftUI iPhone app to explore</small></div></button>
+          <button data-action="open"><span data-icon="folderOpen"></span><div><b>Open Existing Project…</b><small>Open a folder with Swift sources</small></div></button>
+        </div>
+        <button class="sponsor" data-link="https://prozlecenie.pl/" title="Otwórz prozlecenie.pl">
+          <img src="img/prozlecenie.png" alt="">
+          <div><b>ProZlecenie.pl</b><small>Zlecenia budowlane — fachowcy z Twojej okolicy sami zgłoszą się z ceną</small></div>
+          <span class="sponsor-tag">Sponsor</span>
+        </button>
+        <div class="welcome-toolchain" id="welcome-toolchain"></div>
+      </div>
+      <div class="welcome-right">
+        <div class="recent-list" id="recent-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="template-sheet">
+    <div class="sheet">
+      <div class="sheet-page" data-page="1">
+        <div class="sheet-title">Choose a template for your new project:</div>
+        <div class="platform-tabs" id="platform-tabs"><span data-platform="ios" class="active">iOS</span><span data-platform="windows">Windows</span></div>
+        <div class="tpl-section">Application</div>
+        <div class="tpl-grid" id="tpl-grid"></div>
+        <div class="tpl-desc" id="tpl-desc"></div>
+      </div>
+      <div class="sheet-page" data-page="2" hidden>
+        <div class="sheet-title">Choose options for your new project:</div>
+        <div class="form">
+          <label>Product Name:</label><input id="np-name" spellcheck="false" value="MyApp">
+          <label>Team:</label><select disabled><option>None</option><option>Add account…</option></select>
+          <label>Organization Identifier:</label><input id="np-org" spellcheck="false" value="com.example">
+          <label>Bundle Identifier:</label><div class="form-static" id="np-bundle">com.example.MyApp</div>
+          <label class="ios-only">Interface:</label><select class="ios-only" id="np-interface"><option>SwiftUI</option><option disabled>Storyboard (needs UIKit on a Mac)</option></select>
+          <label>Language:</label><select disabled><option>Swift</option></select>
+          <label class="ios-only">Testing System:</label><select class="ios-only"><option>None</option><option disabled>Swift Testing with XCTest UI Tests</option><option disabled>XCTest for Unit and UI Tests</option></select>
+          <label class="ios-only">Storage:</label><select class="ios-only"><option>None</option><option disabled>SwiftData</option><option disabled>Core Data</option></select>
+          <label class="ios-only"></label><label class="ios-only" style="text-align:left;opacity:.5"><input type="checkbox" disabled> Host in CloudKit</label>
+        </div>
+        <div class="form-error" id="np-error"></div>
+      </div>
+      <div class="sheet-buttons">
+        <button class="btn" id="np-cancel">Cancel</button>
+        <div class="spacer"></div>
+        <button class="btn" id="np-prev" hidden>Previous</button>
+        <button class="btn primary" id="np-next">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="prompt-sheet">
+    <div class="sheet small">
+      <div class="sheet-title" id="prompt-title"></div>
+      <div class="prompt-body"><input id="prompt-input" spellcheck="false"></div>
+      <div class="form-error" id="prompt-error"></div>
+      <div class="sheet-buttons">
+        <button class="btn" id="prompt-cancel">Cancel</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="prompt-ok">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="toolchain-sheet">
+    <div class="sheet small">
+      <div class="alert-icon"></div>
+      <div class="sheet-title">Swift toolchain not found</div>
+      <p class="sheet-text">WinSwift Studio compiles your code with the official Swift toolchain for Windows. Install it from swift.org (it also needs Visual Studio Build Tools with the C++ workload and the Windows SDK), then press Retry.</p>
+      <p class="sheet-text mono">winget install --id Swift.Toolchain -e</p>
+      <div class="sheet-buttons">
+        <button class="btn" id="tc-close">Close</button>
+        <div class="spacer"></div>
+        <button class="btn" id="tc-download">Open swift.org</button>
+        <button class="btn primary" id="tc-retry">Retry</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay clear" id="quickopen">
+    <div class="quickopen">
+      <div class="qo-input"><span data-icon="search"></span><input id="qo-input" placeholder="Open Quickly" spellcheck="false"></div>
+      <div class="qo-list" id="qo-list"></div>
+    </div>
+  </div>
+
+  <div class="overlay clear" id="library">
+    <div class="library">
+      <div class="lib-tabs" id="lib-tabs"></div>
+      <div class="lib-head"><div class="lib-title" id="lib-title">Views</div><div class="filter-box"><span data-icon="search" class="filter-ico"></span><input id="lib-filter" placeholder="Filter" spellcheck="false"></div></div>
+      <div class="lib-body"><div class="lib-list" id="lib-list"></div><div class="lib-detail" id="lib-detail"></div></div>
+    </div>
+  </div>
+
+  <div class="overlay clear" id="about">
+    <div class="sheet small about">
+      <div class="welcome-icon"></div>
+      <h2>WinSwift Studio</h2>
+      <div id="about-text" class="sheet-text"></div>
+      <button class="sponsor small" data-link="https://prozlecenie.pl/" title="Otwórz prozlecenie.pl">
+        <img src="img/prozlecenie.png" alt="">
+        <div><b>Sponsor: ProZlecenie.pl</b><small>Fachowcy budowlani z Twojej okolicy</small></div>
+      </button>
+      <div class="sheet-buttons"><div class="spacer"></div><button class="btn primary" id="about-ok">OK</button></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script src="icons.js"></script>
+<script src="sf-symbols.js"></script>
+<script src="swift-lang.js"></script>
+<script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
+<script src="app.js"></script>
+<script src="xcode.js"></script>
+<script src="lsp.js"></script>
+<script src="canvas.js"></script>
+<script src="debugger.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>

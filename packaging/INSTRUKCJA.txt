@@ -1,0 +1,109 @@
+﻿=====================================================================
+  WinSwift Studio — aplikacje na iPhone'a w Swift i SwiftUI na Windows
+=====================================================================
+
+IDE w stylu Xcode dla Windows 10 i 11: edytor z podpowiedziami,
+symulator iPhone'a, podgląd na żywo (Canvas) i debugger.
+
+Sponsor: ProZlecenie.pl — zlecenia budowlane, fachowcy z Twojej okolicy
+sami zgłoszą się z ceną. https://prozlecenie.pl/
+
+
+---------------------------------------------------------------------
+ 1. INSTALACJA (2 minuty)
+---------------------------------------------------------------------
+
+ a) Rozpakuj całe archiwum ZIP (prawy przycisk → "Wyodrębnij wszystkie").
+    Nie uruchamiaj niczego bezpośrednio z podglądu ZIP-a.
+
+ b) Kliknij dwa razy "Zainstaluj.bat".
+    Program skopiuje się do  %LOCALAPPDATA%\Programs\WinSwift Studio
+    i doda skróty "WinSwift Studio" na pulpicie i w menu Start.
+    (Nie potrzeba uprawnień administratora.)
+
+    Możesz też pominąć instalację i po prostu uruchomić
+    "WinSwift Studio.exe" z rozpakowanego folderu.
+
+ c) Jeśli Windows pokaże "System Windows ochronił ten komputer":
+    kliknij "Więcej informacji" → "Uruchom mimo to".
+    (Program nie ma płatnego podpisu cyfrowego — to normalne dla
+    darmowych projektów open source.)
+
+
+---------------------------------------------------------------------
+ 2. KOMPILATOR SWIFT (jednorazowo, potrzebny do uruchamiania kodu)
+---------------------------------------------------------------------
+
+ Kliknij dwa razy "Zainstaluj-Swift-i-narzedzia.bat". Instaluje on:
+   - Swift dla Windows (bez administratora),
+   - Visual Studio Build Tools 2022 z C++ (Windows zapyta o zgodę
+     administratora — to wymaganie kompilatora Swift na Windows).
+
+ Ręcznie to samo:
+   winget install --id Swift.Toolchain -e --scope user
+   https://visualstudio.microsoft.com/visual-cpp-build-tools/
+     → zaznacz "Programowanie aplikacji klasycznych w C++"
+
+ Jeśli brakuje Windows SDK: w programie menu
+   Product → Install Windows SDK (no admin)…
+
+ Po instalacji uruchom WinSwift Studio ponownie.
+
+
+---------------------------------------------------------------------
+ 3. PIERWSZA APLIKACJA NA IPHONE'A
+---------------------------------------------------------------------
+
+ 1. Create New Project… → iOS → App → nazwa → Create.
+ 2. Ctrl+R (albo ▶) — zbuduje i uruchomi aplikację w symulatorze.
+    Pierwsze uruchomienie buduje bibliotekę SwiftUI (ok. 1–2 minuty),
+    kolejne trwają kilka sekund.
+ 3. Ctrl+Alt+Enter — Canvas: podgląd #Preview obok kodu, na żywo.
+ 4. Kliknij numer linii → breakpoint (niebieska strzałka).
+    Ctrl+R zatrzyma się tam; F6 / F7 / F8 = krok, Ctrl+Alt+Y = dalej.
+    W konsoli (lldb) wpisz np.:  po nazwaZmiennej
+
+
+---------------------------------------------------------------------
+ 4. NAJWAŻNIEJSZE SKRÓTY (jak w Xcode, Cmd → Ctrl)
+---------------------------------------------------------------------
+
+ Ctrl+R            Run                     Ctrl+.          Stop
+ Ctrl+B            Build                   Ctrl+Shift+K    Clean
+ Ctrl+Shift+O      Open Quickly            Ctrl+Shift+F    Szukaj w projekcie
+ Ctrl+Shift+L      Library (+)             Ctrl+Alt+Enter  Canvas
+ F2                Rename                  Ctrl+Shift+A    Code Actions
+ Ctrl+\            Breakpoint              F6/F7/F8        Step Over/Into/Out
+ Ctrl+0 / Ctrl+Alt+0 / Ctrl+Shift+Y        panele: nawigator / inspektor / debug
+ Ctrl+,            Ustawienia (motyw jasny/ciemny, czcionka, skróty)
+
+ Pełna lista: Help → Keyboard Shortcuts.
+
+
+---------------------------------------------------------------------
+ 5. SYMULATOR
+---------------------------------------------------------------------
+
+ - Mysz = palec: klik = tap, przytrzymanie = long press, przeciąganie = swipe.
+ - Product → Destination: iPhone 16 Pro / Pro Max / 16 / 16 Plus / 16e / SE.
+ - Menu ≡ w oknie symulatora: Shake, lokalizacja, język, wygląd.
+ - Ctrl+Shift+H = Home, Ctrl+Shift+A = jasny/ciemny, Ctrl+S = zrzut ekranu.
+
+
+---------------------------------------------------------------------
+ 6. OGRANICZENIA (uczciwie)
+---------------------------------------------------------------------
+
+ - Aplikacje działają w symulatorze na Windows (nasza implementacja
+   SwiftUI — najczęściej używana część API). Plik .ipa i publikacja
+   w App Store wymagają Maca z Xcode.
+ - UIKit / Storyboard nie są obsługiwane (tylko SwiftUI).
+ - Windows 7 i 8 nie są obsługiwane — kompilator Swift i Electron
+   wymagają Windows 10 lub 11 (64-bit).
+
+
+---------------------------------------------------------------------
+ Kod źródłowy, zgłaszanie błędów, nowe wersje: strona projektu na GitHubie.
+ Licencja: MIT (logo ProZlecenie należy do właściciela).
+ Projekt niezwiązany z Apple Inc. Xcode, Swift, SwiftUI, iPhone i iOS
+ są znakami towarowymi Apple Inc.

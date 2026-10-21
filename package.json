@@ -1,0 +1,54 @@
+{
+  "name": "winswift-studio",
+  "productName": "WinSwift Studio",
+  "version": "1.0.0",
+  "description": "Build iPhone apps in Swift and SwiftUI on Windows 10 and 11 - an Xcode-style IDE with an iPhone simulator, live previews and a debugger",
+  "main": "main.js",
+  "author": "BiNoX",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/CpMiko2005pl/winswift-studio.git" },
+  "homepage": "https://github.com/CpMiko2005pl/winswift-studio#readme",
+  "bugs": { "url": "https://github.com/CpMiko2005pl/winswift-studio/issues" },
+  "scripts": {
+    "start": "electron .",
+    "icon": "electron scripts/make-icon.js",
+    "package": "node scripts/package.js",
+    "dist": "electron-builder --win dir"
+  },
+  "keywords": ["swift", "swiftui", "ios", "iphone", "xcode-alternative", "windows", "ide", "ios-simulator", "electron", "monaco-editor"],
+  "build": {
+    "appId": "local.swiftcode.ide",
+    "productName": "WinSwift Studio",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "sim-preload.js",
+      "buildtools.js",
+      "runtime/**/*",
+      "scripts/fetch-winsdk.js",
+      "src/**/*",
+      "build/icon.ico",
+      "node_modules/monaco-editor/min/**/*",
+      "node_modules/lucide-static/icons/**/*",
+      "node_modules/@fontsource/inter/**/*"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "dir",
+      "signAndEditExecutable": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "rcedit": "^4.0.1"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.1.0",
+    "lucide-static": "^0.460.0",
+    "monaco-editor": "^0.52.2"
+  }
+}

@@ -1,0 +1,35 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+const on = ch => fn => ipcRenderer.on(ch, (_e, v) => fn(v));
+
+contextBridge.exposeInMainWorld('sim', {
+  info: () => ipcRenderer.invoke('sim:info'),
+  device: () => ipcRenderer.invoke('sim:device'),
+  event: ev => ipcRenderer.send('sim:event', ev),
+  run: () => ipcRenderer.send('sim:run'),
+  ready: () => ipcRenderer.send('sim:ready'),
+  close: () => ipcRenderer.send('sim:close'),
+  minimize: () => ipcRenderer.send('sim:minimize'),
+  openLink: url => ipcRenderer.send('sim:openLink', url),
+  screenshot: rect => ipcRenderer.invoke('sim:screenshot', rect),
+  menu: (x, y) => ipcRenderer.invoke('sim:menu', { x, y }),
+  shake: () => ipcRenderer.send('sim:shake'),
+  scene: phase => ipcRenderer.send('sim:scene', phase),
+  permissionResult: r => ipcRenderer.send('sim:permissionResult', r),
+  setLanguage: l => ipcRenderer.send('sim:setLanguage', l),
+  setLocation: l => ipcRenderer.send('sim:setLocation', l),
+  resetPermissions: app => ipcRenderer.send('sim:resetPermissions', app),
+  onFrame: fn => ipcRenderer.on('sim:frame', (_e, json) => fn(json)),
+  onState: on('sim:state'),
+  onPermission: on('sim:permission'),
+  onShook: on('sim:shook'),
+  onHome: on('sim:home'),
+  onToggleAppearance: on('sim:toggleAppearance'),
+  onCustomLocation: on('sim:customLocation'),
+  onScreenshot: on('sim:screenshot'),
+  onOpenSettings: on('sim:openSettings'),
+  onEndEditing: on('sim:endEditing'),
+  onLanguage: on('sim:language'),
+  onLocationInUse: on('sim:locationInUse'),
+  onModel: on('sim:model'),
+});

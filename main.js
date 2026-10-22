@@ -2394,9 +2394,15 @@ function createWindow() {
     });
     // test hook: a SWIFTCODE_SCRIPT can take screenshots (of the IDE or the simulator) and quit when done
     ipcMain.handle('app:testShot', async (_e, file, which) => {
-      const w = which === 'sim' ? simWin : win;
+      const w = /^sim/.test(which || '') ? simWin : win;
       if (!w || w.isDestroyed()) return false;
-      fs.writeFileSync(file, (await w.webContents.capturePage()).toPNG());
+      // 'sim-device': just the iPhone (bezel included), for the website; '-hd' grows the window first so the phone renders larger
+      let restore = null;
+      if (which === 'sim-device-hd') { restore = w.getContentSize(); w.setContentSize(700, 1400); await new Promise(r => setTimeout(r, 1200)); }
+      const rect = /^sim-device/.test(which) ? await w.webContents.executeJavaScript(`(() => { const r = document.querySelector('#device').getBoundingClientRect();
+        return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }; })()`) : undefined;
+      fs.writeFileSync(file, (await w.webContents.capturePage(rect)).toPNG());
+      if (restore) w.setContentSize(restore[0], restore[1]);
       return true;
     });
     ipcMain.handle('app:testQuit', () => { win.__forceClose = true; app.quit(); });

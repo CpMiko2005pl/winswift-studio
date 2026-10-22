@@ -15,3 +15,7 @@ Thumbs.db
 desktop.ini
 *.log
 *.restored
+
+# website build output
+website/dist/
+website/preview/

@@ -216,6 +216,30 @@ async function main() {
   };
   await og(['Aplikacje na iPhone\'a', 'na Windows'], ['Swift i SwiftUI · symulator iPhone\'a', 'podgląd na żywo · debugger · za darmo'], 'og-image.png');
   await og(['Build iPhone apps', 'on Windows'], ['Swift & SwiftUI · iPhone simulator', 'live previews · debugger · free'], 'og-image-en.png');
+  // 4:3 card thumbnail for tacticalops.fun/files (not part of this site)
+  {
+    const url = await js(`(async () => {
+      const W = 800, H = 600, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+      const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#120c34'); bg.addColorStop(.6, '#2a1470'); bg.addColorStop(1, '#0a0720');
+      g.fillStyle = bg; g.fillRect(0, 0, W, H);
+      const blob = (x, y, r, col) => { const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, col); rg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = rg; g.fillRect(0, 0, W, H); };
+      blob(700, 560, 420, 'rgba(255,61,139,.55)'); blob(780, 600, 240, 'rgba(255,138,61,.6)'); blob(60, 0, 380, 'rgba(79,209,255,.22)');
+      const phone = await load(${JSON.stringify(deviceSrc)});
+      const pw = 250, ph = Math.round(phone.height * pw / phone.width);
+      g.save(); g.translate(500, 70); g.rotate(0.07); g.shadowColor = 'rgba(0,0,0,.7)'; g.shadowBlur = 40; g.shadowOffsetY = 18;
+      g.beginPath(); g.roundRect(0, 0, pw, ph, pw * 0.159); g.fillStyle = '#111'; g.fill(); g.shadowColor = 'transparent'; g.clip(); g.drawImage(phone, 0, 0, pw, ph); g.restore();
+      const icon = await load(${JSON.stringify(dataUrl(path.join(ROOT, 'build', 'web', 'icon-512.png')))});
+      g.shadowColor = 'rgba(139,92,246,.6)'; g.shadowBlur = 40; g.drawImage(icon, 56, 70, 150, 150); g.shadowColor = 'transparent';
+      g.fillStyle = '#fff'; g.font = '800 50px OGInter'; g.fillText('WinSwift', 56, 300); g.fillText('Studio', 56, 356);
+      const t = 'na Windows'; g.font = '800 34px OGInter';
+      g.fillStyle = 'rgba(238,235,255,.85)'; g.fillText('Aplikacje na iPhone\\'a', 56, 430);
+      const gr = g.createLinearGradient(56, 0, 56 + g.measureText(t).width, 0); gr.addColorStop(0, '#ffb04a'); gr.addColorStop(.5, '#ff3d8b'); gr.addColorStop(1, '#b07bff');
+      g.fillStyle = gr; g.fillText(t, 56, 474);
+      g.font = '600 20px OGInter'; g.fillStyle = 'rgba(238,235,255,.7)'; g.fillText('Swift · SwiftUI · symulator', 58, 530);
+      return c.toDataURL('image/jpeg', 0.88);
+    })()`);
+    saveDataUrl(url, path.join(__dirname, 'files-thumb.jpg'));
+  }
   win.destroy();
 
   // pages

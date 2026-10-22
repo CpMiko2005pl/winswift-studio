@@ -2457,6 +2457,8 @@ function menuTemplate(name) {
       { id: 'devtools', label: 'Developer Tools', accel: 'CmdOrCtrl+Shift+Alt+I' },
     ],
     help: [
+      { id: 'website', label: 'WinSwift Studio Website' },
+      { type: 'separator' },
       { id: 'help-docs', label: 'Developer Documentation', accel: 'CmdOrCtrl+Shift+0' },
       { id: 'quick-help', label: 'Quick Help for Selected Item', accel: 'CmdOrCtrl+Shift+Alt+H', enabled: isFile },
       { type: 'separator' },
@@ -2635,6 +2637,7 @@ const COMMANDS = {
   'help-stdlib': () => api.openExternal('https://developer.apple.com/documentation/swift/swift-standard-library'),
   'help-keys': showShortcuts,
   'sponsor': () => api.openExternal('https://prozlecenie.pl/'),
+  'website': () => api.openExternal('https://winswift.tacticalops.fun/'),
   'check-updates': () => checkForUpdates(true),
   'install-swift': () => showOverlay('toolchain-sheet'),
   'about': cmdAbout,

@@ -2,6 +2,8 @@
 
 <h1 align="center">WinSwift Studio</h1>
 
+<p align="center">🌐 <a href="https://winswift.tacticalops.fun/"><b>winswift.tacticalops.fun</b></a> · <a href="https://winswift.tacticalops.fun/en/">English</a></p>
+
 <p align="center"><b>Twórz aplikacje na iPhone'a w Swift i SwiftUI — na Windows 10 i 11.</b><br>
 Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with an iPhone simulator, live previews and a debugger.</p>
 
@@ -10,6 +12,7 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows" alt="Windows 10 | 11">
   <img src="https://img.shields.io/badge/Swift-6-F05138?style=for-the-badge&logo=swift&logoColor=white" alt="Swift 6">
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT">
+  <a href="https://winswift.tacticalops.fun/"><img src="https://img.shields.io/badge/strona-winswift.tacticalops.fun-8b5cf6?style=for-the-badge" alt="Strona projektu"></a>
 </p>
 
 <p align="center"><a href="https://prozlecenie.pl/"><img src="src/img/prozlecenie.png" width="44" alt="ProZlecenie"></a><br>

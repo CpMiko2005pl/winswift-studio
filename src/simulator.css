@@ -125,6 +125,9 @@ body { font: 13px "Segoe UI", system-ui, sans-serif; color: #ddd; user-select: n
 .vstack > .divider, .root > .divider, .fill-area > .divider { height: .5px; align-self: stretch; }
 .hstack > .divider { width: .5px; align-self: stretch; }
 .text { white-space: pre-wrap; overflow-wrap: break-word; min-width: 0; text-align: inherit; }
+/* SwiftUI's HStack offers every child an equal share; a short Text keeps its natural width and the rest goes to the
+   long one, which wraps (HStack { Text("Address:"); Text(longAddress) }) — instead of squeezing both by their length */
+.hstack > .text { flex: 1 1 0%; max-width: max-content; }
 .color, .shape { flex: 1 1 auto; align-self: stretch; min-width: 0; min-height: 0; }
 .group { display: contents; }
 

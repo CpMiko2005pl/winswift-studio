@@ -92,6 +92,7 @@ function jsonLd(lang) {
         featureList: features, isAccessibleForFree: true, license: 'https://opensource.org/licenses/MIT', inLanguage: ['pl', 'en'],
         offers: { '@type': 'Offer', price: '0', priceCurrency: pl ? 'PLN' : 'USD', availability: 'https://schema.org/InStock', url: SETUP },
         author: { '@id': `${BASE}#org` }, publisher: { '@id': `${BASE}#org` }, sameAs: [REPO],
+        sponsor: [{ '@type': 'Organization', name: 'ProZlecenie.pl', url: 'https://prozlecenie.pl/' }, { '@type': 'Organization', name: 'CyberScope.pl', url: 'https://cyberscope.pl/' }],
       },
       {
         '@type': 'SoftwareSourceCode', '@id': `${BASE}#source`, name: 'WinSwift Studio', codeRepository: REPO,
@@ -139,6 +140,7 @@ async function main() {
   fs.copyFileSync(path.join(ROOT, 'build', 'web', 'favicon.ico'), path.join(OUT, 'favicon.ico'));
   fs.copyFileSync(path.join(ROOT, 'build', 'icon-source.svg'), path.join(OUT, 'icon.svg'));
   fs.copyFileSync(path.join(ROOT, 'src', 'img', 'prozlecenie.png'), path.join(OUT, 'img', 'prozlecenie.png'));
+  fs.copyFileSync(path.join(ROOT, 'build', 'sponsors', 'cyberscope-192.png'), path.join(OUT, 'img', 'cyberscope.png'));
 
   // image work in an offscreen Chromium page (canvas): WebP screenshots and share images
   const win = new BrowserWindow({ show: false, width: 400, height: 300, webPreferences: { offscreen: true, webSecurity: false } });
@@ -284,7 +286,7 @@ async function main() {
 - Uses the official Swift 6 compiler for Windows (swift.org) plus an open reimplementation of the SwiftUI API that renders in a built-in iPhone simulator window (iPhone 16 Pro, 16 Pro Max, 16, 16 Plus, 16e, SE).
 - Supports SwiftUI (NavigationStack, List, Form, TabView, @State, @Binding, @Observable, @AppStorage, alerts, sheets, gestures, localization, asset catalogs). UIKit and Storyboards are not supported.
 - One-click setup: per-user installer without admin rights; the app installs the Swift toolchain and Visual Studio Build Tools via winget.
-- Not affiliated with Apple Inc. Sponsor: ProZlecenie.pl (https://prozlecenie.pl/).
+- Not affiliated with Apple Inc. Sponsors: ProZlecenie.pl (https://prozlecenie.pl/) and CyberScope.pl (https://cyberscope.pl/).
 `);
   console.log(`site built: ${OUT} (v${VERSION}, ${SIZE}, css ${CSS}, js ${JS}, IndexNow key ${INDEXNOW})`);
 }

@@ -8,8 +8,11 @@ Po instalacji program sam zaproponuje instalację kompilatora Swift
 (Swift dla Windows + Visual Studio Build Tools, przez winget).
 After installing, the app offers to install the Swift toolchain for you.
 
-Sponsor: ProZlecenie.pl — zlecenia budowlane, fachowcy z Twojej okolicy
-sami zgłoszą się z ceną. https://prozlecenie.pl/
+Sponsorzy / Sponsors:
+ • ProZlecenie.pl — zlecenia budowlane, fachowcy z Twojej okolicy sami
+   zgłoszą się z ceną. https://prozlecenie.pl/
+ • CyberScope.pl — portal o cyberbezpieczeństwie: aktualności, analizy
+   i poradniki. https://cyberscope.pl/
 
 Projekt nie jest powiązany z Apple Inc. Xcode, Swift, SwiftUI, iPhone i iOS
 są znakami towarowymi Apple Inc. / Not affiliated with Apple Inc.
@@ -37,5 +40,5 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-The ProZlecenie name and logo belong to their owner and are not licensed
-under the MIT License.
+The ProZlecenie and CyberScope names and logos belong to their owners and are
+not licensed under the MIT License.

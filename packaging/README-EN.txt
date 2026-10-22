@@ -20,6 +20,7 @@ Apps run in a built-in iPhone simulator on Windows (an open reimplementation
 of SwiftUI). Building .ipa files / App Store still needs a Mac with Xcode.
 Windows 7/8 are not supported (Swift and Electron need Windows 10+).
 
-Sponsor: ProZlecenie.pl — https://prozlecenie.pl/
+Sponsors: ProZlecenie.pl — https://prozlecenie.pl/
+          CyberScope.pl — https://cyberscope.pl/
 License: MIT. Not affiliated with Apple Inc.; Xcode, Swift, SwiftUI, iPhone and
 iOS are trademarks of Apple Inc.

@@ -1,7 +1,7 @@
 {
   "name": "winswift-studio",
   "productName": "WinSwift Studio",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Build iPhone apps in Swift and SwiftUI on Windows 10 and 11 - an Xcode-style IDE with an iPhone simulator, live previews and a debugger",
   "main": "main.js",
   "author": "BiNoX",
@@ -17,6 +17,7 @@
   "scripts": {
     "start": "electron .",
     "icon": "electron scripts/make-icon.js",
+    "installer-art": "electron scripts/make-installer-art.js",
     "package": "node scripts/package.js",
     "installer": "electron-builder --win nsis --x64",
     "release": "npm run installer && npm run package"
@@ -103,7 +104,11 @@
         "en_US"
       ],
       "language": "1045",
-      "license": "build/license.txt"
+      "license": "build/license.txt",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "include": "build/installer.nsh"
     }
   },
   "devDependencies": {

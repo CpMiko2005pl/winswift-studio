@@ -582,6 +582,15 @@ input, select { font: inherit; color: var(--text); }
 .sponsor small { display: block; font-size: 11.5px; color: rgba(255, 255, 255, .75); line-height: 1.3; }
 .sponsor-tag { margin-left: auto; align-self: flex-start; font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; color: #7fe0a8; }
 .sponsor.small { max-width: none; margin: 4px 0 0; }
+.sponsor.small + .sponsor.small { margin-top: 8px; }
+.sponsor.cs { background: linear-gradient(135deg, rgba(11, 18, 32, .95), rgba(15, 42, 34, .9)); border-color: rgba(16, 185, 129, .4); }
+.sponsor.cs:hover { border-color: rgba(16, 185, 129, .8); }
+.sponsors-label { margin-top: 14px; font-size: 9.5px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #7fe0a8; }
+.sponsors { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 330px; margin-top: 6px; }
+.sponsor.mini { margin: 0; padding: 7px 9px; gap: 8px; max-width: none; }
+.sponsor.mini img { width: 30px; height: 30px; border-radius: 8px; }
+.sponsor.mini b { font-size: 12px; }
+.sponsor.mini small { font-size: 10.5px; }
 .welcome-toolchain { margin-top: auto; font-size: 11.5px; color: var(--text-3); text-align: center; }
 .welcome-toolchain a { color: var(--accent); cursor: pointer; }
 .welcome-toolchain .ok { color: var(--green); }

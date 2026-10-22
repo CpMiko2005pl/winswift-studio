@@ -15,8 +15,14 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
   <a href="https://winswift.tacticalops.fun/"><img src="https://img.shields.io/badge/strona-winswift.tacticalops.fun-8b5cf6?style=for-the-badge" alt="Strona projektu"></a>
 </p>
 
-<p align="center"><a href="https://prozlecenie.pl/"><img src="src/img/prozlecenie.png" width="44" alt="ProZlecenie"></a><br>
-Sponsor: <a href="https://prozlecenie.pl/"><b>ProZlecenie.pl</b></a> — zlecenia budowlane, fachowcy z Twojej okolicy sami zgłoszą się z ceną.</p>
+<p align="center"><b>Sponsorzy</b></p>
+
+<table align="center">
+  <tr>
+    <td align="center" width="340"><a href="https://prozlecenie.pl/?utm_source=winswift-studio&utm_medium=github"><img src="src/img/prozlecenie.png" width="48" alt="ProZlecenie"><br><b>ProZlecenie.pl</b></a><br>Zlecenia budowlane — fachowcy z Twojej okolicy sami zgłoszą się z ceną.</td>
+    <td align="center" width="340"><a href="https://cyberscope.pl/?utm_source=winswift-studio&utm_medium=github"><img src="src/img/cyberscope.png" width="48" alt="CyberScope"><br><b>CyberScope.pl</b></a><br>Cyberbezpieczeństwo — aktualności, analizy i poradniki o zagrożeniach w sieci.</td>
+  </tr>
+</table>
 
 <p align="center"><img src="docs/screenshots/canvas.png" width="860" alt="Edytor SwiftUI z podglądem Canvas"></p>
 
@@ -65,7 +71,7 @@ Budowa: Electron + Monaco Editor, SourceKit-LSP, lldb-dap, symulator i SwiftUI w
 ## Licencja
 
 Kod: MIT — zobacz [LICENSE](LICENSE). Biblioteki: Electron, Monaco Editor (MIT), Lucide (ISC), Inter (SIL OFL).
-Logo i marka **ProZlecenie** należą do ich właściciela i nie są objęte licencją MIT.
+Logo i marki sponsorów (**ProZlecenie**, **CyberScope**) należą do ich właścicieli i nie są objęte licencją MIT.
 
 ## Znaki towarowe
 

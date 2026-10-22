@@ -25,7 +25,7 @@ app.whenReady().then(async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
   fs.mkdirSync(outDir, { recursive: true });
-  for (const [name, w, h, mobile] of [['desktop', 1440, 900, false], ['phone', 390, 844, true]]) {
+  for (const [name, w, h, mobile] of [['desktop', 1440, 900, false], ['tablet', 900, 1000, false], ['phone', 390, 844, true]]) {
     const win = new BrowserWindow({ show: false, width: w, height: h, useContentSize: true, webPreferences: { offscreen: true } });
     if (mobile) win.webContents.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1');
     for (let attempt = 0; attempt < 3; attempt++) {

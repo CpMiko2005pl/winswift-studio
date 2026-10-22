@@ -2196,7 +2196,7 @@ function syncUserSnippets() {
 async function cmdAbout() {
   const v = await api.version();
   const tc = await api.toolchain();
-  $('#about-text').innerHTML = `Version ${esc(v)}<br>${tc.found ? `Swift ${esc(tc.version)}<br><span style="font-size:11px">${esc(tc.path)}</span>` : 'Swift toolchain not installed'}<br><br>Build iPhone apps in Swift and SwiftUI on Windows 10 and 11:<br>an Xcode-style IDE with an iPhone simulator, live previews and LLDB.<br><br><span style="font-size:11px">Not affiliated with Apple Inc. Xcode, Swift, SwiftUI, iPhone and iOS<br>are trademarks of Apple Inc.</span>`;
+  $('#about-text').innerHTML = `Version ${esc(v)}<br>${tc.found ? `Swift ${esc(tc.version)}<br><span style="font-size:11px;word-break:break-all">${esc(tc.path)}</span>` : 'Swift toolchain not installed'}<br><br>Build iPhone apps in Swift and SwiftUI on Windows 10 and 11:<br>an Xcode-style IDE with an iPhone simulator, live previews and LLDB.<br><br><span style="font-size:11px">Not affiliated with Apple Inc. Xcode, Swift, SwiftUI, iPhone and iOS<br>are trademarks of Apple Inc.</span>`;
   showOverlay('about');
 }
 $('#about-ok').onclick = () => hideOverlay('about');
@@ -2472,6 +2472,7 @@ function menuTemplate(name) {
       { id: 'install-swift', label: 'Install Swift Toolchain…' },
       { type: 'separator' },
       { id: 'sponsor', label: 'ProZlecenie.pl — fachowcy z Twojej okolicy (sponsor)' },
+      { id: 'sponsor-cs', label: 'CyberScope.pl — cyberbezpieczeństwo (sponsor)' },
       { id: 'about', label: 'About WinSwift Studio' },
     ],
   };
@@ -2636,7 +2637,8 @@ const COMMANDS = {
   'help-windows': () => api.openExternal('https://www.swift.org/install/windows/'),
   'help-stdlib': () => api.openExternal('https://developer.apple.com/documentation/swift/swift-standard-library'),
   'help-keys': showShortcuts,
-  'sponsor': () => api.openExternal('https://prozlecenie.pl/'),
+  'sponsor': () => api.openExternal('https://prozlecenie.pl/?utm_source=winswift-studio&utm_medium=app'),
+  'sponsor-cs': () => api.openExternal('https://cyberscope.pl/?utm_source=winswift-studio&utm_medium=app'),
   'website': () => api.openExternal('https://winswift.tacticalops.fun/'),
   'check-updates': () => checkForUpdates(true),
   'install-swift': () => showOverlay('toolchain-sheet'),

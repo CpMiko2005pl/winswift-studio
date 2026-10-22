@@ -214,18 +214,28 @@ td.me { background: rgba(255, 61, 139, .06); }
 .faq details[open] summary::after { transform: rotate(45deg); }
 .faq details p { margin: 0 0 18px; color: var(--muted); }
 
-/* sponsor */
-.sponsor {
-  display: grid; grid-template-columns: auto 1fr auto; gap: 26px; align-items: center; padding: 30px 34px; border-radius: 24px;
-  background: linear-gradient(120deg, rgba(21, 44, 79, .95), rgba(23, 74, 92, .8)); border: 1px solid rgba(91, 192, 135, .35);
-  box-shadow: 0 30px 80px rgba(5, 20, 30, .5); text-decoration: none;
+/* sponsors */
+.sp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.sp-card {
+  display: flex; flex-direction: column; gap: 16px; padding: 30px; border-radius: 24px; text-decoration: none; color: #fff;
+  border: 1px solid; box-shadow: 0 30px 80px rgba(5, 20, 30, .45); transition: transform .25s, border-color .25s, box-shadow .25s;
 }
-.sponsor img { width: 84px; height: 84px; border-radius: 20px; }
-.sponsor h3 { margin: 4px 0 6px; font-size: 24px; }
-.sponsor p { margin: 0; color: rgba(255,255,255,.78); }
-.sponsor .tag { font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #7fe0a8; }
+.sp-card:hover { transform: translateY(-4px); }
+.sp-top { display: flex; align-items: center; gap: 18px; }
+.sp-card img { width: 64px; height: 64px; border-radius: 16px; flex: none; box-shadow: 0 10px 24px rgba(0,0,0,.35); }
+.sp-card h3 { margin: 2px 0 0; font-size: 24px; letter-spacing: -.3px; }
+.sp-card p { margin: 0; color: rgba(255,255,255,.8); }
+.sp-card .tag { font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; }
+.sp-card .btn { align-self: flex-start; margin-top: auto; }
+.sp-pz { background: linear-gradient(130deg, rgba(21, 44, 79, .96), rgba(23, 80, 94, .85)); border-color: rgba(91, 192, 135, .35); }
+.sp-pz:hover { border-color: rgba(91, 192, 135, .8); }
+.sp-pz .tag { color: #7fe0a8; }
+.sp-cs { background: linear-gradient(130deg, rgba(11, 18, 32, .97), rgba(15, 48, 38, .9)); border-color: rgba(16, 185, 129, .4); }
+.sp-cs:hover { border-color: rgba(16, 185, 129, .85); box-shadow: 0 30px 80px rgba(16, 185, 129, .12); }
+.sp-cs .tag { color: #34d399; }
 .btn-green { background: linear-gradient(120deg, #3ee08f, #1fb6a6); color: #062a22; }
-.btn-green:hover { transform: translateY(-2px); }
+.btn-emerald { background: linear-gradient(120deg, #34d399, #10b981); color: #04261b; }
+.btn-green:hover, .btn-emerald:hover { transform: translateY(-2px); }
 
 /* final cta */
 .final { text-align: center; padding: 70px 30px; border-radius: 28px; background: linear-gradient(140deg, rgba(139,92,246,.22), rgba(255,61,139,.16) 55%, rgba(255,138,61,.18)); border: 1px solid var(--line); position: relative; overflow: hidden; }
@@ -253,6 +263,12 @@ footer .legal { grid-column: 1 / -1; padding-top: 22px; border-top: 1px solid va
 
 /* responsive */
 @media (max-width: 1020px) {
+  .nav { display: none; position: absolute; left: 0; right: 0; top: 64px; flex-direction: column; padding: 10px 16px 18px; background: rgba(10, 7, 32, .97); border-bottom: 1px solid var(--line); }
+  .nav.open { display: flex; }
+  .nav a { padding: 12px; font-size: 16px; }
+  .menu-btn { display: grid; place-items: center; }
+  .lang { margin-left: auto; }
+  .menu-btn { margin-left: 0; }
   .hero .wrap, .split { grid-template-columns: 1fr; }
   .hero { padding-top: 48px; }
   .stage { max-width: 760px; margin: 10px auto 40px; }
@@ -263,15 +279,13 @@ footer .legal { grid-column: 1 / -1; padding-top: 22px; border-top: 1px solid va
   footer .about { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
-  .nav { display: none; position: absolute; left: 0; right: 0; top: 64px; flex-direction: column; padding: 10px 16px 18px; background: rgba(10, 7, 32, .97); border-bottom: 1px solid var(--line); }
-  .nav.open { display: flex; }
-  .nav a { padding: 12px; font-size: 16px; }
-  .menu-btn { display: grid; place-items: center; }
   .top .btn-sm { display: none; }
   section { padding: 70px 0; }
   .features { grid-template-columns: 1fr; }
   .card.wide { grid-column: auto; }
-  .sponsor { grid-template-columns: 1fr; text-align: center; justify-items: center; }
+  .sp-grid { grid-template-columns: 1fr; }
+  .sp-card { padding: 24px; }
+  .sp-card .btn { align-self: stretch; }
   .phone-float { aspect-ratio: 640 / 1335; width: 34%; right: -2%; }
   .btn { width: 100%; }
   .cta { flex-direction: column; align-items: stretch; }

@@ -1427,8 +1427,17 @@ function renderHome() {
   pzLab.textContent = 'ProZlecenie';
   pz.append(pzTile, pzLab);
   pz.title = 'prozlecenie.pl';
-  pz.addEventListener('click', () => window.sim.openLink('https://prozlecenie.pl/'));
+  pz.addEventListener('click', () => window.sim.openLink('https://prozlecenie.pl/?utm_source=winswift-studio&utm_medium=simulator'));
   icons.appendChild(pz);
+  const cs = div('app-icon');
+  const csTile = div('tile');
+  csTile.style.background = '#0b1220 url("img/cyberscope.png") center / cover';
+  const csLab = document.createElement('span');
+  csLab.textContent = 'CyberScope';
+  cs.append(csTile, csLab);
+  cs.title = 'cyberscope.pl';
+  cs.addEventListener('click', () => window.sim.openLink('https://cyberscope.pl/?utm_source=winswift-studio&utm_medium=simulator'));
+  icons.appendChild(cs);
   const sys = [['Settings', 'gear', '#8e8e93'], ['Safari', 'safari', '#0a84ff'], ['Photos', 'photo', '#ff9f0a'], ['Camera', 'camera', '#3a3a3c'], ['Notes', 'note.text', '#ffcc00'], ['Maps', 'map', '#34c759'], ['Weather', 'cloud.sun', '#32ade6']];
   for (const [name, icon, color] of sys) {
     const a = div('app-icon');

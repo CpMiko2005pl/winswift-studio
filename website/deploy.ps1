@@ -5,7 +5,8 @@ $ErrorActionPreference = 'Continue'   # cloudflared/ssh print warnings on stderr
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 if (-not $NoBuild) {
-  & .\node_modules\electron\dist\electron.exe website\build.js
+  # electron.exe is a GUI-subsystem program: piping its output makes PowerShell wait for the build to finish
+  & .\node_modules\electron\dist\electron.exe website\build.js 2>&1 | ForEach-Object { "$_" }
   if ($LASTEXITCODE) { throw 'website build failed' }
 }
 $tgz = Join-Path $env:TEMP 'winswift-site.tgz'

@@ -32,9 +32,10 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
 2. Przy pierwszym uruchomieniu kliknij **Install Swift…** — program sam zainstaluje kompilator Swift i Visual Studio Build Tools (przez winget; Windows raz zapyta o zgodę administratora). Gdy skończy, kliknij **Retry**.
 3. *Create New Project… → iOS → App* i **Ctrl+R** — aplikacja uruchomi się w symulatorze iPhone'a (pierwsze uruchomienie buduje bibliotekę SwiftUI, ok. 1–2 min).
 
-> Windows pokazuje „System Windows ochronił ten komputer”? Kliknij **Więcej informacji → Uruchom mimo to** — program jest darmowy i nie ma płatnego podpisu cyfrowego.
+> Windows pokazuje „System Windows ochronił ten komputer”? Kliknij **Więcej informacji → Uruchom mimo to** — program nie ma płatnego podpisu cyfrowego.
 
-**Aktualizacje:** program sam sprawdza nowe wersje (*Help → Check for Updates…*); nowy instalator instaluje się na starą wersję, projekty i ustawienia zostają.
+**Aktywacja:** przy pierwszym uruchomieniu wklej klucz licencyjny (`WS1-…`) albo token **15-minutowej darmowej próby** — oba są w Twoim profilu w sklepie **[xdecode.cyberscope.pl](https://xdecode.cyberscope.pl/)**. Klucz działa na jednym komputerze naraz: w *Ustawieniach → Licencja* możesz go dezaktywować i aktywować na innym. Aktywowany program działa na zawsze, także bez internetu.
+**Aktualizacje:** program sam sprawdza nowe wersje (przy starcie, co kilka godzin i gdy wróci internet) i proponuje **Pobierz i zainstaluj** — aktualizacja instaluje się sama i uruchamia program ponownie; projekty i ustawienia zostają.
 **Odinstalowanie:** *Ustawienia → Aplikacje → Zainstalowane aplikacje → WinSwift Studio → Odinstaluj* (Twoje projekty nie są usuwane).
 **Wersja przenośna:** w *Releases* jest też `WinSwift-Studio-…-Windows-x64.zip` — rozpakuj i uruchom `WinSwift Studio.exe` albo `Zainstaluj.bat` (instrukcja w `INSTRUKCJA.txt`, odinstalowanie przez `Odinstaluj.bat`).
 

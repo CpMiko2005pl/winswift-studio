@@ -56,6 +56,9 @@ const ICONS = {
   replace: '<path d="M2.5 5.5h8M8 3l2.5 2.5L8 8M13.5 10.5h-8M8 8l-2.5 2.5L8 13"/>',
   thread: '<path d="M2.5 4h11M2.5 8h11M2.5 12h7"/>',
   frame: '<rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 6h5M5.5 9h3"/>',
+  key: '<circle cx="5" cy="11" r="3"/><path d="M7.2 8.8 14 2M11.5 4.5l2 2M9.5 6.5 11 8"/>',
+  download: '<path d="M8 2v8.5M4.5 7 8 10.5 11.5 7M2.5 13.5h11"/>',
+  cart: '<path d="M1.5 2.5h2l1.7 7.5h7.3l1.5-5.5H4.2"/><circle cx="6.3" cy="12.8" r="1"/><circle cx="11.6" cy="12.8" r="1"/>',
 };
 
 function icon(name, cls = '') {

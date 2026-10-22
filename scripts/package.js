@@ -29,7 +29,7 @@ fs.renameSync(path.join(out, 'electron.exe'), path.join(out, `${NAME}.exe`));
 log('electron runtime copied');
 
 // 2) the app
-for (const f of ['main.js', 'preload.js', 'sim-preload.js', 'buildtools.js', 'LICENSE', 'README.md']) copy(path.join(root, f), path.join(appDir, f));
+for (const f of ['main.js', 'preload.js', 'sim-preload.js', 'buildtools.js', 'activation.js', 'updater.js', 'LICENSE', 'README.md']) copy(path.join(root, f), path.join(appDir, f));
 for (const d of ['src', 'runtime']) copy(path.join(root, d), path.join(appDir, d));
 copy(path.join(root, 'scripts', 'fetch-winsdk.js'), path.join(appDir, 'scripts', 'fetch-winsdk.js'));
 for (const f of ['icon.ico', 'icon.png']) copy(path.join(root, 'build', f), path.join(appDir, 'build', f));

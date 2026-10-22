@@ -55,7 +55,14 @@ contextBridge.exposeInMainWorld('api', {
   eof: () => invoke('build:eof'),
   installSdk: () => invoke('sdk:install'),
   installToolchain: () => invoke('toolchain:install'),
-  checkUpdate: () => invoke('app:checkUpdate'),
+  checkUpdate: () => invoke('update:check'),
+  downloadUpdate: info => invoke('update:download', info),
+  cancelUpdate: () => invoke('update:cancel'),
+  installUpdate: file => invoke('update:install', file),
+  licenseState: () => invoke('license:state'),
+  activate: input => invoke('license:activate', input),
+  deactivate: () => invoke('license:deactivate'),
+  checkLicense: () => invoke('license:check'),
   showSimulator: () => invoke('sim:show'),
 
   debugRequest: (command, args) => invoke('debug:request', command, args),
@@ -87,7 +94,7 @@ contextBridge.exposeInMainWorld('api', {
   closeConfirmed: () => invoke('app:close-confirmed'),
 
   on: (channel, fn) => {
-    const allowed = ['build:event', 'project:changed', 'app:before-close', 'app:command', 'lsp:notification', 'preview:event', 'debug:event', 'sim:modelChanged'];
+    const allowed = ['build:event', 'project:changed', 'app:before-close', 'app:command', 'lsp:notification', 'preview:event', 'debug:event', 'sim:modelChanged', 'license:changed', 'update:progress'];
     if (!allowed.includes(channel)) return;
     ipcRenderer.on(channel, (_e, payload) => fn(payload));
   },

@@ -1337,6 +1337,7 @@ api.on('sim:modelChanged', onSimModel);
 
 async function runAction(action, extra = {}) {
   if (!S.root) { toast('Open a project first'); return; }
+  if (licenseLocked()) { showLicenseSheet(S.license.status); return; }
   if (S.building || S.running) await api.stop();
   if (setting('saveBeforeRun') !== false) await saveAll();
   clearDiagnostics();
@@ -1688,7 +1689,7 @@ function hideOverlay(id) { $('#' + id).classList.remove('show'); }
 const overlayOpen = () => $$('.overlay.show').length > 0;
 
 $$('.overlay').forEach(o => o.addEventListener('mousedown', e => {
-  if (e.target === o && o.id !== 'welcome' && o.id !== 'template-sheet') hideOverlay(o.id);
+  if (e.target === o && o.id !== 'welcome' && o.id !== 'template-sheet' && !o.classList.contains('modal')) hideOverlay(o.id);
 }));
 
 // --- welcome
@@ -1772,31 +1773,273 @@ $('#tc-install').onclick = async () => {
   }, 10000);
 };
 
-// ======================================================================== updates (GitHub releases)
+// ======================================================================== activation (activation.js in the main process)
 
-const newerVersion = (a, b) => {
-  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
-  for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0); }
-  return false;
+// the activation and update screens speak Polish on a Polish Windows, English elsewhere
+const PL = /^pl\b/i.test(navigator.language || '');
+const L = (pl, en) => (PL ? pl : en);
+// licenses are sold in the shop; the profile there shows the license key and starts the 15-minute trial
+const SHOP = 'https://xdecode.cyberscope.pl';
+const afterLicenseQueue = [];
+
+const minutesLeft = st => Math.max(1, Math.ceil((st.remaining || 0) / 60));
+const licenseLocked = () => !!S.license && (S.license.status === 'new' || S.license.status === 'expired');
+// things that should wait until the activation screen is gone (the Swift setup sheet, the update sheet)
+function afterLicense(fn) { if (licenseLocked()) afterLicenseQueue.push(fn); else fn(); }
+
+function licenseError(r) {
+  if (r.error === 'in_use') return L(`Ten klucz jest już aktywny na innym komputerze (${r.deviceName || '?'}). Najpierw dezaktywuj go tam: Ustawienia → Licencja.`,
+    `This key is already active on another PC (${r.deviceName || '?'}). Deactivate it there first: Settings → License.`);
+  return ({
+    format: L('To nie wygląda na klucz licencyjny (WS1-…) ani na token próbny. Skopiuj go w całości ze swojego profilu w sklepie.', 'This doesn’t look like a license key (WS1-…) or a trial token. Copy it in full from your profile in the shop.'),
+    invalid: L('Nie ma takiego klucza licencyjnego. Sprawdź, czy skopiowałeś go w całości.', 'There is no such license key. Check that you copied all of it.'),
+    trial_invalid: L('Token próbny jest nieprawidłowy albo już wygasł. Okres próbny można uruchomić raz na konto.', 'The trial token is not valid or has already expired. Each account gets one trial.'),
+    revoked: L('Ta licencja została wyłączona w sklepie. Napisz do obsługi sklepu.', 'This license has been switched off in the shop. Contact the shop’s support.'),
+    upstream: L('Sklep z licencjami chwilowo nie odpowiada. Spróbuj za kilka minut.', 'The license shop is not responding right now. Try again in a few minutes.'),
+    rate: L('Za dużo prób. Spróbuj ponownie za kilka minut.', 'Too many attempts. Try again in a few minutes.'),
+    nokey: L('Na tym komputerze brakuje zapisanego klucza. Napisz do obsługi sklepu.', 'The saved key is missing on this PC. Contact the shop’s support.'),
+    offline: L('Brak połączenia z internetem. Jest potrzebny tylko przy aktywacji i dezaktywacji.', 'No internet connection. You only need it to activate or deactivate.'),
+  })[r.error] || L('Serwer aktywacji zwrócił błąd. Spróbuj za chwilę.', 'The activation server returned an error. Try again in a moment.');
+}
+
+function droppedText(reason) {
+  return reason === 'revoked'
+    ? L('Licencja używana na tym komputerze została wyłączona w sklepie.', 'The license used on this PC has been switched off in the shop.')
+    : L('Licencja na tym komputerze nie jest już aktywna — klucz został dezaktywowany albo przeniesiony na inny komputer.', 'The license on this PC is no longer active — the key was deactivated or moved to another PC.');
+}
+
+function showLicenseSheet(mode) {
+  const st = S.license || {};
+  S.licMode = mode;
+  const min = st.trialMinutes || 15;
+  const t = {
+    new: [L('Aktywuj WinSwift Studio', 'Activate WinSwift Studio'),
+      L(`Wklej klucz licencyjny (WS1-…) albo token ${min}-minutowej darmowej próby — oba znajdziesz w swoim profilu w sklepie. Klucz działa na jednym komputerze naraz; w Ustawieniach możesz go dezaktywować i użyć na innym.`,
+        `Paste your license key (WS1-…) or a ${min}-minute free trial token — both are in your profile in the shop. A key works on one PC at a time; you can deactivate it in Settings and use it on another PC.`)],
+    expired: [L('Okres próbny się skończył', 'Your free trial has ended'),
+      L(`Twoje ${min} darmowych minut minęło — wszystkie pliki są zapisane. Kup licencję i wklej klucz z profilu, żeby dalej korzystać z WinSwift Studio. Po aktywacji program działa na zawsze, także bez internetu.`,
+        `Your ${min} free minutes are up — all your files are saved. Buy a license and paste the key from your profile to keep using WinSwift Studio. Once activated it works forever, offline too.`)],
+    trial: [L('Wersja próbna', 'Free trial'),
+      L(`Zostało ${minutesLeft(st)} min okresu próbnego. Wklej klucz licencyjny, żeby korzystać z programu bez ograniczeń.`, `${minutesLeft(st)} trial minutes left. Paste a license key to unlock the app for good.`)],
+  }[mode];
+  $('#lic-title').textContent = st.dropped && mode !== 'trial' ? L('Licencja nieaktywna', 'License not active') : t[0];
+  $('#lic-text').textContent = st.dropped && mode !== 'trial' ? `${droppedText(st.dropped)} ${L('Wklej klucz licencyjny, żeby dalej korzystać z programu.', 'Paste a license key to keep using the app.')}` : t[1];
+  $('#lic-code').placeholder = mode === 'new' ? L('WS1-… albo token próbny', 'WS1-… or a trial token') : 'WS1-…';
+  $('#lic-activate').textContent = L('Aktywuj', 'Activate');
+  $('#lic-trial-label').textContent = L(`Wypróbuj ${min} min za darmo`, `Try free for ${min} min`);
+  $('#lic-buy-label').textContent = L('Kup licencję', 'Buy a License');
+  $('#lic-or span').textContent = L('albo', 'or');
+  $('#lic-trial').hidden = mode !== 'new';
+  $('#lic-steps').hidden = true;
+  $('#lic-help').textContent = L('Mój profil w sklepie', 'My shop profile');
+  $('#lic-quit').textContent = L('Zakończ', 'Quit');
+  $('#lic-quit').hidden = mode === 'trial';
+  $('#lic-close').textContent = L('Wróć do próby', 'Continue Trial');
+  $('#lic-close').hidden = mode !== 'trial';
+  $('#lic-error').textContent = '';
+  showOverlay('license-sheet');
+  setTimeout(() => $('#lic-code').focus(), 50);
+}
+
+function hideLicenseSheet() {
+  hideOverlay('license-sheet');
+  if (!licenseLocked()) afterLicenseQueue.splice(0).forEach(fn => fn());
+}
+
+function renderTrialPill() {
+  const st = S.license, el = $('#tb-trial');
+  const show = !!st && st.status === 'trial';
+  el.hidden = !show;
+  if (!show) return;
+  const m = minutesLeft(st);
+  el.lastChild.textContent = L(`Wersja próbna · ${m} min`, `Trial · ${m} min left`);
+  el.classList.toggle('low', m <= 3);
+  el.title = L('Kliknij, żeby wpisać klucz licencyjny', 'Click to enter a license key');
+}
+$('#tb-trial').append(document.createElement('span'));
+$('#tb-trial').onclick = () => showLicenseSheet('trial');
+
+async function onLicense(st) {
+  const prev = S.license;
+  S.license = st;
+  renderTrialPill();
+  if (licenseLocked()) {
+    // the trial just ran out (or the license was dropped): keep the work, stop the running app
+    if (prev && !['new', 'expired'].includes(prev.status)) {
+      try { await saveAll(); } catch {}
+      if (S.building || S.running) api.stop();
+    }
+    showLicenseSheet(st.status);
+  } else {
+    if ($('#license-sheet').classList.contains('show') && S.licMode !== 'trial') hideLicenseSheet();
+    // unlocked: the Canvas that failed with "not activated" builds again
+    if (prev && ['new', 'expired'].includes(prev.status) && typeof canvasShown === 'function' && canvasShown()) refreshCanvas({ force: true });
+  }
+  if ($('#settings-ov') && typeof settingsTab !== 'undefined' && settingsTab === 'license') renderSettingsTab();
+}
+api.on('license:changed', onLicense);
+
+// one field: a license key (WS1-…) or the trial token from the shop profile
+async function activateCode(input, errorEl, button) {
+  const text = input.value.replace(/\s+/g, '');
+  if (!text) { errorEl.textContent = L('Wklej klucz licencyjny albo token próbny.', 'Paste a license key or a trial token.'); input.focus(); return false; }
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = L('Sprawdzam…', 'Checking…');
+  errorEl.textContent = '';
+  const r = await api.activate(text);
+  button.disabled = false;
+  button.textContent = label;
+  if (!r.ok) { errorEl.textContent = licenseError(r); input.select(); return false; }
+  onLicense(await api.licenseState());
+  if (r.trial) toast(L(`Okres próbny działa — zostało ${minutesLeft(S.license)} min. Klucz wkleisz w każdej chwili: kliknij „Wersja próbna” u góry.`, `Trial started — ${minutesLeft(S.license)} min left. Paste a key any time: click “Trial” at the top.`), 7000);
+  else toast(L('Aktywowano — dziękujemy! WinSwift Studio działa teraz bez ograniczeń.', 'Activated — thank you! WinSwift Studio is now unlocked for good.'), 5000);
+  return true;
+}
+
+$('#lic-code').addEventListener('keydown', e => { if (e.key === 'Enter') $('#lic-activate').click(); });
+$('#lic-activate').onclick = async () => {
+  if (await activateCode($('#lic-code'), $('#lic-error'), $('#lic-activate'))) { $('#lic-code').value = ''; hideLicenseSheet(); }
 };
+// the trial starts in the shop profile (one per account); the token comes back here
+$('#lic-trial').onclick = () => {
+  api.openExternal(`${SHOP}/profile.php`);
+  const steps = $('#lic-steps');
+  steps.innerHTML = L(
+    `<li>Na stronie, która się otworzyła, zaloguj się albo <a data-u="register.php">załóż konto</a>.</li><li>W profilu kliknij <b>Rozpocznij okres próbny</b>.</li><li>Skopiuj token i wklej go powyżej, potem <b>Aktywuj</b>.</li>`,
+    `<li>On the page that opened, sign in or <a data-u="register.php">create an account</a>.</li><li>In your profile click <b>Start trial</b> (“Rozpocznij okres próbny”).</li><li>Copy the token, paste it above and press <b>Activate</b>.</li>`);
+  steps.hidden = false;
+  $('#lic-code').focus();
+};
+$('#lic-steps').addEventListener('click', e => { const a = e.target.closest('a[data-u]'); if (a) api.openExternal(`${SHOP}/${a.dataset.u}`); });
+$('#lic-buy').onclick = () => api.openExternal(`${SHOP}/buy.php`);
+$('#lic-close').onclick = () => hideLicenseSheet();
+$('#lic-quit').onclick = () => api.quit();
+$('#lic-help').onclick = () => api.openExternal(`${SHOP}/profile.php`);
+
+async function deactivateLicense(button, noteEl) {
+  const ok = await api.confirm(L('Dezaktywować licencję na tym komputerze?', 'Deactivate the license on this PC?'),
+    L('Klucz zostanie zwolniony i będzie go można aktywować ponownie — na tym albo innym komputerze. Do tego czasu WinSwift Studio na tym komputerze będzie wymagał klucza.',
+      'The key is released and can be activated again — on this or another PC. Until then WinSwift Studio on this PC asks for a key.'),
+    [L('Dezaktywuj', 'Deactivate'), L('Anuluj', 'Cancel')]);
+  if (ok !== 0) return;
+  button.disabled = true;
+  const r = await api.deactivate();
+  button.disabled = false;
+  if (!r.ok) { noteEl.textContent = licenseError(r); return; }
+  toast(L('Licencja dezaktywowana — klucz możesz teraz aktywować na dowolnym komputerze.', 'License deactivated — you can now activate the key on any PC.'), 6000);
+  onLicense(await api.licenseState());
+}
+
+// ======================================================================== updates (update.json on the website)
+
 async function checkForUpdates(manual) {
   const u = await api.checkUpdate();
-  if (!u || !u.latest) { if (manual) toast('Could not reach GitHub — check your internet connection'); return; }
-  if (!newerVersion(u.latest, u.current)) { if (manual) toast(`WinSwift Studio ${u.current} is up to date`); S.update = null; renderUpdateBanner(); return; }
+  if (!u || u.offline || u.error) {
+    S.updateRetry = true;   // checked again as soon as Windows reports the connection is back
+    if (manual) toast(u && u.offline ? L('Brak internetu — sprawdzę aktualizacje, gdy połączenie wróci.', 'No internet connection — I’ll check again when you’re back online.')
+      : L('Nie udało się sprawdzić aktualizacji. Spróbuj później.', 'Could not check for updates. Try again later.'), 5000);
+    return;
+  }
+  S.updateRetry = false;
+  if (!u.available) {
+    if (manual) toast(L(`Masz najnowszą wersję (${u.current}).`, `WinSwift Studio ${u.current} is up to date.`));
+    S.update = null;
+    renderUpdateBanner();
+    return;
+  }
+  const known = S.update && S.update.latest === u.latest;
   S.update = u;
   renderUpdateBanner();
-  if (manual) {
-    const r = await api.confirm(`WinSwift Studio ${u.latest} is available`, `You have ${u.current}. Download the installer and run it — your projects and settings stay.`, ['Download', 'Later']);
-    if (r === 0) api.openExternal(u.setup || u.url);
-  } else toast(`New version ${u.latest} available — Help ▸ Check for Updates…`, 6000);
+  if (manual || u.mandatory || !known || !S.updateDismissed) afterLicense(() => showUpdateSheet());
 }
+
 function renderUpdateBanner() {
+  const u = S.update;
   const el = $('#welcome-update');
-  if (!el) return;
-  el.hidden = !S.update;
-  if (S.update) el.innerHTML = `${icon('sparkles')} WinSwift Studio ${esc(S.update.latest)} is available — <a>Download</a>`;
+  el.hidden = !u;
+  if (u) el.innerHTML = `${icon('sparkles')} ${esc(L(`Dostępna wersja ${u.latest}`, `WinSwift Studio ${u.latest} is available`))} — <a>${esc(L('Zaktualizuj', 'Update'))}</a>`;
+  const pill = $('#tb-update');
+  pill.hidden = !u;
+  if (u) { pill.lastChild.textContent = L(`Aktualizacja ${u.latest}`, `Update ${u.latest}`); pill.title = L('Pobierz i zainstaluj nową wersję', 'Download and install the new version'); }
 }
-$('#welcome-update').addEventListener('click', () => { if (S.update) api.openExternal(S.update.setup || S.update.url); });
+$('#tb-update').append(document.createElement('span'));
+$('#tb-update').onclick = () => showUpdateSheet();
+$('#welcome-update').addEventListener('click', () => showUpdateSheet());
+
+const mb = n => (n / 1048576).toFixed(n >= 104857600 ? 0 : 1);
+
+function showUpdateSheet() {
+  const u = S.update;
+  if (!u) return;
+  $('#upd-title').textContent = L(`Dostępna jest wersja ${u.latest}`, `WinSwift Studio ${u.latest} is available`);
+  $('#upd-sub').textContent = L(`Masz wersję ${u.current}. `, `You have ${u.current}. `) + (u.canInstall
+    ? L('Aktualizacja pobierze się i zainstaluje sama, a program uruchomi się ponownie. Projekty i ustawienia zostają.', 'The update downloads and installs itself, then the app restarts. Your projects and settings stay.')
+    : L('Pobierz nową wersję i zainstaluj ją na starą.', 'Download the new version and install it over this one.'));
+  $('#upd-notes').textContent = (PL ? u.notes : u.notesEn) || '';
+  $('#upd-progress').hidden = !S.updDownloading;
+  $('#upd-error').textContent = '';
+  $('#upd-go').disabled = !!S.updDownloading;
+  $('#upd-go').textContent = u.canInstall ? L('Pobierz i zainstaluj', 'Download and Install') : L('Pobierz', 'Download');
+  $('#upd-later').textContent = S.updDownloading ? L('Anuluj', 'Cancel') : L('Później', 'Later');
+  $('#upd-later').hidden = u.mandatory && !S.updDownloading;
+  showOverlay('update-sheet');
+}
+
+$('#upd-later').onclick = () => {
+  if (S.updDownloading) { api.cancelUpdate(); return; }
+  S.updateDismissed = true;
+  hideOverlay('update-sheet');
+};
+
+$('#upd-go').onclick = async () => {
+  const u = S.update;
+  if (!u || S.updDownloading) return;
+  if (!u.canInstall) { api.openExternal(u.url || u.page); hideOverlay('update-sheet'); return; }
+  S.updDownloading = true;
+  $('#upd-go').disabled = true;
+  $('#upd-later').textContent = L('Anuluj', 'Cancel');
+  $('#upd-later').hidden = false;
+  $('#upd-error').textContent = '';
+  $('#upd-progress').hidden = false;
+  $('#upd-bar').style.width = '0%';
+  $('#upd-status').textContent = L('Łączę się…', 'Connecting…');
+  const r = await api.downloadUpdate(u);
+  S.updDownloading = false;
+  if (r.error) {
+    $('#upd-go').disabled = false;
+    $('#upd-later').textContent = L('Później', 'Later');
+    $('#upd-later').hidden = u.mandatory;
+    if (r.error === 'cancelled') { $('#upd-progress').hidden = true; return; }
+    $('#upd-go').textContent = L('Spróbuj ponownie', 'Try Again');
+    $('#upd-error').textContent = r.error === 'checksum'
+      ? L('Pobrany plik jest uszkodzony (zła suma kontrolna). Spróbuj ponownie.', 'The downloaded file is damaged (checksum mismatch). Try again.')
+      : L('Pobieranie nie powiodło się. Sprawdź internet i spróbuj ponownie.', 'The download failed. Check your internet connection and try again.');
+    return;
+  }
+  $('#upd-bar').style.width = '100%';
+  $('#upd-status').textContent = L('Instaluję… WinSwift Studio zamknie się i za chwilę uruchomi ponownie.', 'Installing… WinSwift Studio closes and restarts in a moment.');
+  $('#upd-later').hidden = true;
+  try { await saveAll(); } catch {}
+  if (!(await api.installUpdate(r.file))) {
+    $('#upd-error').textContent = L('Nie udało się uruchomić instalatora.', 'Could not start the installer.');
+    $('#upd-go').disabled = false;
+    $('#upd-later').hidden = false;
+  }
+};
+
+api.on('update:progress', p => {
+  const pct = p.total ? Math.min(100, (p.received / p.total) * 100) : 0;
+  $('#upd-bar').style.width = pct.toFixed(1) + '%';
+  $('#upd-status').textContent = p.total ? L(`Pobieranie… ${mb(p.received)} z ${mb(p.total)} MB`, `Downloading… ${mb(p.received)} of ${mb(p.total)} MB`)
+    : L(`Pobieranie… ${mb(p.received)} MB`, `Downloading… ${mb(p.received)} MB`);
+});
+
+// back online: the update check and the license check that failed run again
+window.addEventListener('online', () => {
+  if (S.updateRetry) checkForUpdates(false);
+  api.checkLicense();
+});
 
 // --- new project sheet
 const TEMPLATES = {
@@ -2469,6 +2712,7 @@ function menuTemplate(name) {
       { id: 'help-keys', label: 'Keyboard Shortcuts' },
       { type: 'separator' },
       { id: 'check-updates', label: S.update ? `Update Available: ${S.update.latest}…` : 'Check for Updates…' },
+      { id: 'license', label: S.license && S.license.status === 'licensed' ? 'License…' : 'Activate WinSwift Studio…' },
       { id: 'install-swift', label: 'Install Swift Toolchain…' },
       { type: 'separator' },
       { id: 'sponsor', label: 'ProZlecenie.pl — fachowcy z Twojej okolicy (sponsor)' },
@@ -2641,6 +2885,7 @@ const COMMANDS = {
   'sponsor-cs': () => api.openExternal('https://cyberscope.pl/?utm_source=winswift-studio&utm_medium=app'),
   'website': () => api.openExternal('https://winswift.tacticalops.fun/'),
   'check-updates': () => checkForUpdates(true),
+  'license': () => (S.license && ['new', 'expired', 'trial'].includes(S.license.status) ? showLicenseSheet(S.license.status) : showSettings('license')),
   'install-swift': () => showOverlay('toolchain-sheet'),
   'about': cmdAbout,
 };
@@ -2737,7 +2982,7 @@ window.addEventListener('keydown', e => {
   if (overlayOpen()) {
     if (e.key === 'Escape') {
       const top = $$('.overlay.show').pop();
-      if (top && !(top.id === 'welcome' && !S.root)) hideOverlay(top.id);
+      if (top && !(top.id === 'welcome' && !S.root) && !top.classList.contains('modal')) hideOverlay(top.id);
     }
     return;
   }
@@ -2788,12 +3033,15 @@ async function init() {
   window.addEventListener('beforeunload', () => api.setState({ lastOpen: !!S.root }));
   setInterval(() => api.setState({ lastOpen: !!S.root }), 5000);
   // test hook: SWIFTCODE_DEBUG=1 + SWIFTCODE_SCRIPT="<js>" runs a script once the UI is up
+  // activation first: a key, the free trial, or the "trial has ended" screen
+  onLicense(await api.licenseState());
   const script = await api.debugScript();
   if (!script) {
-    // first run on a new PC: offer to install Swift right away; then look for a newer release
+    // first run on a new PC: offer to install Swift right away; then look for a newer version (and again every few hours)
     const tc = await api.toolchain();
-    if (!tc.found) setTimeout(() => showOverlay('toolchain-sheet'), 600);
+    if (!tc.found) afterLicense(() => setTimeout(() => showOverlay('toolchain-sheet'), 600));
     setTimeout(() => checkForUpdates(false), 4000);
+    setInterval(() => checkForUpdates(false), 3 * 3600 * 1000);
   }
   if (script) setTimeout(() => { try { (0, eval)(script); } catch (e) { console.error(e); } }, 800);
 }

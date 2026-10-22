@@ -38,7 +38,14 @@ Sponsorzy:
  c) Jeśli Windows pokaże "System Windows ochronił ten komputer":
     kliknij "Więcej informacji" → "Uruchom mimo to".
     (Program nie ma płatnego podpisu cyfrowego — to normalne dla
-    darmowych projektów open source.)
+    projektów open source.)
+
+ d) AKTYWACJA: przy pierwszym uruchomieniu wklej klucz licencyjny
+    (WS1-…) albo token 15-minutowej darmowej próby. Oba znajdziesz
+    w swoim profilu w sklepie: https://xdecode.cyberscope.pl/
+    Klucz działa na jednym komputerze naraz — w Ustawieniach (Ctrl+,)
+    → Licencja → "Dezaktywuj" zwolnisz go i aktywujesz na innym.
+    Aktywowany program działa na zawsze, także bez internetu.
 
 
 ---------------------------------------------------------------------
@@ -107,9 +114,12 @@ Sponsorzy:
  6. AKTUALIZACJE I ODINSTALOWANIE
 ---------------------------------------------------------------------
 
- - Program sam sprawdza nowe wersje (Help → Check for Updates…).
-   Nowy instalator po prostu instaluje się na starą wersję —
-   projekty i ustawienia zostają.
+ - Program sam sprawdza nowe wersje (przy starcie, co kilka godzin
+   i gdy wróci internet; ręcznie: Help → Check for Updates…).
+   Wersja z instalatora Setup.exe aktualizuje się sama: "Pobierz
+   i zainstaluj" — po chwili program uruchomi się w nowej wersji.
+   Wersja z ZIP-a otwiera stronę pobierania. Projekty i ustawienia
+   zostają.
  - Odinstalowanie:
      * instalator Setup.exe → Ustawienia → Aplikacje → Zainstalowane
        aplikacje → WinSwift Studio → Odinstaluj,

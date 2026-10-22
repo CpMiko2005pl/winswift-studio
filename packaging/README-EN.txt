@@ -20,6 +20,11 @@ Apps run in a built-in iPhone simulator on Windows (an open reimplementation
 of SwiftUI). Building .ipa files / App Store still needs a Mac with Xcode.
 Windows 7/8 are not supported (Swift and Electron need Windows 10+).
 
+Activation: on first launch paste your license key (WS1-…) or a 15-minute free
+trial token — both are in your profile at https://xdecode.cyberscope.pl/
+A key works on one PC at a time (Settings → License → Deactivate frees it);
+once activated the app works forever, offline too.
+
 Sponsors: ProZlecenie.pl — https://prozlecenie.pl/
           CyberScope.pl — https://cyberscope.pl/
 License: MIT. Not affiliated with Apple Inc.; Xcode, Swift, SwiftUI, iPhone and

@@ -1,8 +1,18 @@
 ﻿WinSwift Studio — aplikacje na iPhone'a w Swift i SwiftUI na Windows 10 i 11
 Build iPhone apps in Swift & SwiftUI on Windows 10 and 11
 
-Darmowy program open source na licencji MIT.
-Free and open-source software under the MIT License.
+Kod źródłowy jest otwarty (licencja MIT).
+The source code is open (MIT License).
+
+AKTYWACJA / ACTIVATION
+Gotowy program wymaga klucza licencyjnego (WS1-…) ze sklepu
+https://xdecode.cyberscope.pl/ — w profilu znajdziesz klucz albo uruchomisz
+jednorazowy, 15-minutowy okres próbny. Klucz działa na jednym komputerze
+naraz; w Ustawieniach → Licencja możesz go dezaktywować i użyć na innym.
+Aktywowany program działa na zawsze, także bez internetu.
+The app needs a license key (WS1-…) from https://xdecode.cyberscope.pl/ —
+your profile there shows the key or starts a one-time 15-minute free trial.
+A key works on one PC at a time; Settings → License → Deactivate frees it.
 
 Po instalacji program sam zaproponuje instalację kompilatora Swift
 (Swift dla Windows + Visual Studio Build Tools, przez winget).

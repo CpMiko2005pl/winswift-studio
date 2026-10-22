@@ -666,6 +666,71 @@ input, select { font: inherit; color: var(--text); }
 .about .welcome-icon { width: 96px; height: 96px; }
 .about h2 { margin: 8px 0 6px; }
 
+/* activation & updates */
+.overlay.modal { z-index: 70; background: rgba(0, 0, 0, .58); }
+#update-sheet { z-index: 80; }
+.license, .update { align-items: center; text-align: center; width: 460px; }
+.license .welcome-icon, .update .welcome-icon { width: 84px; height: 84px; }
+.license h2, .update h2 { margin: 10px 0 6px; font-size: 17px; }
+.license .sheet-text { max-width: 380px; }
+.lic-form { display: flex; gap: 8px; width: 100%; margin-top: 4px; }
+.lic-form input {
+  flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid #55555a; border-radius: 8px; background: var(--bg-input); color: var(--text);
+  font: 500 12.5px/1 var(--font-code);
+}
+.lic-form input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(10, 132, 255, .25); }
+.lic-form input::placeholder { color: var(--text-3); font-family: var(--font-ui); font-size: 12.5px; }
+.lic-form .btn { height: 34px; min-width: 104px; font-weight: 600; }
+.license .form-error { padding: 4px 0 0; min-height: 18px; line-height: 1.4; }
+.lic-or { display: flex; align-items: center; gap: 10px; width: 100%; margin: 6px 0 10px; color: var(--text-3); font-size: 11.5px; }
+.lic-or::before, .lic-or::after { content: ""; flex: 1; height: 1px; background: var(--separator); }
+.lic-actions { display: flex; gap: 8px; width: 100%; }
+.lic-actions[hidden] { display: none; }
+.btn.lic-big { flex: 1; height: 34px; display: flex; align-items: center; justify-content: center; gap: 7px; font-weight: 600; white-space: nowrap; }
+.btn.lic-big[hidden] { display: none; }
+.btn.lic-big .ico { width: 15px; height: 15px; }
+.btn.lic-big.trial .ico { color: var(--green); }
+.btn.lic-big.buy .ico { color: var(--orange); }
+.lic-steps {
+  width: 100%; margin: 10px 0 0; padding: 10px 12px 10px 30px; text-align: left; font-size: 12.5px; line-height: 1.6;
+  background: rgba(50, 215, 75, .08); border: 1px solid rgba(50, 215, 75, .25); border-radius: 8px;
+}
+.lic-steps a { color: var(--accent); cursor: pointer; }
+.lic-help { color: var(--accent); font-size: 12px; cursor: pointer; }
+.lic-help:hover { text-decoration: underline; }
+.license .sheet-buttons, .update .sheet-buttons { width: 100%; }
+.upd-notes {
+  width: 100%; max-height: 180px; overflow: auto; text-align: left; white-space: pre-wrap; font-size: 12.5px; line-height: 1.5;
+  background: var(--bg-input); border: 1px solid var(--border-soft); border-radius: 8px; padding: 9px 11px; user-select: text;
+}
+.upd-notes:empty { display: none; }
+.upd-progress { width: 100%; margin-top: 12px; }
+.upd-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.upd-bar div { height: 100%; width: 0; border-radius: 3px; background: var(--accent); transition: width .15s; }
+.upd-status { margin-top: 6px; font-size: 11.5px; color: var(--text-2); }
+.update .form-error { padding: 6px 0 0; }
+.tb-pill {
+  display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; margin-right: 4px; flex: none;
+  border: 1px solid transparent; border-radius: 12px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+}
+.tb-pill[hidden] { display: none; }
+.tb-pill .ico { width: 13px; height: 13px; }
+.tb-pill.trial { background: rgba(255, 159, 10, .15); border-color: rgba(255, 159, 10, .35); color: #ffc46b; }
+.tb-pill.trial:hover { background: rgba(255, 159, 10, .25); }
+.tb-pill.trial.low { background: rgba(255, 69, 58, .18); border-color: rgba(255, 69, 58, .45); color: #ff8a80; }
+.tb-pill.upd { background: rgba(10, 132, 255, .16); border-color: rgba(10, 132, 255, .4); color: #7cb8ff; }
+.tb-pill.upd:hover { background: rgba(10, 132, 255, .26); }
+.st-license { display: flex; flex-direction: column; gap: 12px; }
+.st-lic-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border-soft); }
+.st-lic-card .welcome-icon { width: 52px; height: 52px; border-radius: 12px; flex: none; }
+.st-lic-card b { font-size: 14px; }
+.st-lic-card .st-note { margin-top: 3px; }
+.st-lic-badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 700; vertical-align: 1px; }
+.st-lic-badge.ok { background: rgba(50, 215, 75, .16); color: var(--green); }
+.st-lic-badge.trial { background: rgba(255, 159, 10, .16); color: var(--orange); }
+.st-lic-badge.off { background: rgba(255, 69, 58, .16); color: var(--red); }
+.st-license .lic-form { max-width: 460px; }
+
 #toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); z-index: 99;
   background: rgba(50, 50, 55, .97); border: 1px solid #4c4c52; border-radius: 9px; padding: 8px 14px;
@@ -860,6 +925,11 @@ html.light .btn { background: #ffffff; border-color: #c8c8cc; box-shadow: 0 1px 
 html.light .btn:hover { background: #f3f3f5; }
 html.light .btn:active { background: #e8e8ea; }
 html.light .btn.primary { background: var(--accent); border-color: #0a6ee6; }
+html.light .lic-form input { border-color: #c8c8cc; }
+html.light .upd-bar { background: rgba(0, 0, 0, .1); }
+html.light .tb-pill.trial { color: #a35f00; }
+html.light .tb-pill.trial.low { color: #c4271f; }
+html.light .tb-pill.upd { color: #0a5fc2; }
 html.light .platform-tabs { background: #e3e3e6; }
 html.light .platform-tabs span.active { background: #ffffff; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
 html.light .tpl:hover { background: rgba(0, 0, 0, .04); }

@@ -46,6 +46,8 @@
     </div>
 
     <div class="tb-right">
+      <button class="tb-pill upd" id="tb-update" data-icon="download" hidden></button>
+      <button class="tb-pill trial" id="tb-trial" data-icon="clock" hidden></button>
       <button class="tb-btn" id="btn-library" data-icon="plus" title="Library (Ctrl+Shift+L)"></button>
       <button class="tb-btn" id="btn-insp" data-icon="sidebarRight" title="Hide or show the Inspectors (Ctrl+Alt+0)"></button>
     </div>
@@ -344,6 +346,49 @@
         <div><b>Sponsor: CyberScope.pl</b><small>Portal o cyberbezpieczeństwie i zagrożeniach w sieci</small></div>
       </button>
       <div class="sheet-buttons"><div class="spacer"></div><button class="btn primary" id="about-ok">OK</button></div>
+    </div>
+  </div>
+
+  <!-- activation: shown at the first start (code or 15-minute trial) and when the trial ends -->
+  <div class="overlay modal" id="license-sheet">
+    <div class="sheet small license">
+      <div class="welcome-icon"></div>
+      <h2 id="lic-title"></h2>
+      <p class="sheet-text" id="lic-text"></p>
+      <div class="lic-form">
+        <input id="lic-code" spellcheck="false" autocomplete="off" maxlength="2000">
+        <button class="btn primary" id="lic-activate"></button>
+      </div>
+      <div class="form-error" id="lic-error"></div>
+      <div class="lic-or" id="lic-or"><span></span></div>
+      <div class="lic-actions">
+        <button class="btn lic-big trial" id="lic-trial"><span data-icon="clock"></span><span id="lic-trial-label"></span></button>
+        <button class="btn lic-big buy" id="lic-buy"><span data-icon="cart"></span><span id="lic-buy-label"></span></button>
+      </div>
+      <ol class="lic-steps" id="lic-steps" hidden></ol>
+      <div class="sheet-buttons">
+        <a class="lic-help" id="lic-help"></a>
+        <div class="spacer"></div>
+        <button class="btn" id="lic-quit"></button>
+        <button class="btn" id="lic-close"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- updates from winswift.tacticalops.fun/update.json -->
+  <div class="overlay modal" id="update-sheet">
+    <div class="sheet small update">
+      <div class="welcome-icon"></div>
+      <h2 id="upd-title"></h2>
+      <p class="sheet-text" id="upd-sub"></p>
+      <div class="upd-notes" id="upd-notes"></div>
+      <div class="upd-progress" id="upd-progress" hidden><div class="upd-bar"><div id="upd-bar"></div></div><div class="upd-status" id="upd-status"></div></div>
+      <div class="form-error" id="upd-error"></div>
+      <div class="sheet-buttons">
+        <button class="btn" id="upd-later"></button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="upd-go"></button>
+      </div>
     </div>
   </div>
 

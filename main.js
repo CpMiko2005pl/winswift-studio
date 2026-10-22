@@ -8,6 +8,8 @@ const fsp = fs.promises;
 const os = require('os');
 const { spawn, execFile } = require('child_process');
 const { rewriteForWindows, parseStrings } = require('./buildtools');
+const license = require('./activation.js');   // not './license' — on Windows that finds the LICENSE file
+const updater = require('./updater');
 
 const IGNORED_DIRS = new Set(['.build', '.git', '.swiftpm', 'node_modules', '.vs', '.vscode', '.idea']);
 
@@ -2037,7 +2039,11 @@ function registerIpc() {
   });
   ipcMain.handle('debug:setBreakpoints', (_e, list) => debugSetBreakpoints(list));
   ipcMain.handle('debug:active', () => !!dbg);
-  ipcMain.handle('preview:start', (_e, opts) => { canvasStart(opts).catch(e => canvasEvent({ type: 'error', seq: canvasSeq, errors: [{ message: String(e?.message || e) }] })); return true; });
+  ipcMain.handle('preview:start', (_e, opts) => {
+    if (license.isLocked()) { canvasEvent({ type: 'error', seq: canvasSeq, errors: [{ message: 'WinSwift Studio is not activated' }] }); send('license:changed', license.state()); return false; }
+    canvasStart(opts).catch(e => canvasEvent({ type: 'error', seq: canvasSeq, errors: [{ message: String(e?.message || e) }] }));
+    return true;
+  });
   ipcMain.handle('preview:stop', () => { canvasSeq++; return canvasKill(); });
   ipcMain.handle('preview:input', (_e, ev) => {
     if (canvasProc && canvasProc.stdin.writable) canvasProc.stdin.write('\u001eEV ' + JSON.stringify(ev) + '\n');
@@ -2210,7 +2216,11 @@ function registerIpc() {
   });
 
   ipcMain.handle('toolchain:info', async (_e, refresh) => { if (refresh) await refreshEnv(); return toolchainInfo(); });
-  ipcMain.handle('build:start', (_e, opts) => { startJob(opts).catch(e => { ev('log', { text: String(e?.stack || e) }); ev('done', { ok: false, phase: 'build' }); }); return true; });
+  ipcMain.handle('build:start', (_e, opts) => {
+    if (license.isLocked()) { ev('log', { text: 'WinSwift Studio is not activated — enter an activation code first.' }); ev('done', { ok: false, phase: 'build' }); send('license:changed', license.state()); return false; }
+    startJob(opts).catch(e => { ev('log', { text: String(e?.stack || e) }); ev('done', { ok: false, phase: 'build' }); });
+    return true;
+  });
   ipcMain.handle('build:stop', () => stopJob());
   ipcMain.handle('sdk:install', () => new Promise(resolve => {
     // reuse Electron's bundled Node to run the per-user SDK fetcher
@@ -2301,7 +2311,8 @@ function registerIpc() {
   });
   ipcMain.handle('sim:show', () => { ensureSimWindow(true); simWin.show(); simWin.focus(); });
 
-  ipcMain.handle('app:openExternal', (_e, url) => shell.openExternal(url));
+  // test hook: SWIFTCODE_NO_EXTERNAL logs links instead of opening the browser
+  ipcMain.handle('app:openExternal', (_e, url) => (process.env.SWIFTCODE_NO_EXTERNAL ? console.log('[openExternal]', url) : shell.openExternal(url)));
   ipcMain.handle('app:devtools', () => win.webContents.toggleDevTools());
   ipcMain.handle('app:fullscreen', () => win.setFullScreen(!win.isFullScreen()));
   ipcMain.handle('app:version', () => app.getVersion());
@@ -2311,24 +2322,20 @@ function registerIpc() {
     if (!fs.existsSync(bat)) { shell.openExternal('https://www.swift.org/install/windows/'); return false; }
     return (await shell.openPath(bat)) === '';
   });
-  // Help ▸ Check for Updates: the newest release on GitHub
-  ipcMain.handle('app:checkUpdate', () => new Promise(resolve => {
-    const req = https.get('https://api.github.com/repos/CpMiko2005pl/winswift-studio/releases/latest',
-      { headers: { 'User-Agent': 'WinSwift-Studio', Accept: 'application/vnd.github+json' }, timeout: 8000 }, res => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', d => { body += d; });
-        res.on('end', () => {
-          try {
-            const j = JSON.parse(body);
-            const setup = (j.assets || []).find(a => /setup.*\.exe$/i.test(a.name));
-            resolve({ current: app.getVersion(), latest: String(j.tag_name || '').replace(/^v/i, ''), url: j.html_url, setup: setup?.browser_download_url || null, notes: j.name || '' });
-          } catch { resolve(null); }
-        });
-      });
-    req.on('timeout', () => req.destroy());
-    req.on('error', () => resolve(null));
-  }));
+  // updates: update.json on the website (updater.js) — download with progress, then a silent install that restarts the app
+  ipcMain.handle('update:check', () => updater.check());
+  ipcMain.handle('update:download', (_e, info) => updater.download(info, p => send('update:progress', p)));
+  ipcMain.handle('update:cancel', () => updater.cancel());
+  ipcMain.handle('update:install', (_e, file) => {
+    if (!updater.install(file)) return false;
+    setTimeout(() => { if (win && !win.isDestroyed()) win.__forceClose = true; stopJob(); app.quit(); }, 400);
+    return true;
+  });
+  // activation (activation.js)
+  ipcMain.handle('license:state', () => license.state());
+  ipcMain.handle('license:activate', (_e, input) => license.activate(input));
+  ipcMain.handle('license:deactivate', () => license.deactivate());
+  ipcMain.handle('license:check', () => license.checkOnline());
   ipcMain.handle('app:initialPath', () => {
     const p = initialPath();
     if (!p) return null;
@@ -2436,6 +2443,7 @@ app.setAppUserModelId('local.swiftcode.ide');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 app.whenReady().then(async () => {
+  license.init({ notify: s => send('license:changed', s) });
   registerIpc();
   refreshEnv();
   createWindow();

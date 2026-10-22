@@ -90,7 +90,7 @@ function showSettings(tab) {
   const ov = document.createElement('div');
   ov.className = 'overlay show';
   ov.id = 'settings-ov';
-  const tabs = [['general', 'General', 'gear'], ['themes', 'Themes', 'appearance'], ['text', 'Text Editing', 'editorOptions'], ['keys', 'Key Bindings', 'keyboard'], ['locations', 'Locations', 'folder']];
+  const tabs = [['general', 'General', 'gear'], ['themes', 'Themes', 'appearance'], ['text', 'Text Editing', 'editorOptions'], ['keys', 'Key Bindings', 'keyboard'], ['locations', 'Locations', 'folder'], ['license', L('Licencja', 'License'), 'key']];
   ov.innerHTML = `<div class="sheet settings-sheet">
     <div class="st-tabs">${tabs.map(([id, label, ic]) => `<button data-t="${id}" class="${id === settingsTab ? 'sel' : ''}">${icon(ic)}<span>${label}</span></button>`).join('')}</div>
     <div class="st-body" id="st-body"></div>
@@ -183,6 +183,9 @@ async function renderSettingsTab() {
     host.querySelector('[data-a=dd]').onclick = () => api.openPath(S.root + '\\.build');
     host.querySelector('[data-a=clean]').onclick = () => { cleanAction(); $('#st-note').textContent = 'Derived data deleted.'; };
     return;
+  } else if (settingsTab === 'license') {
+    renderLicenseTab(host, await api.licenseState());
+    return;
   }
   host.querySelectorAll('[data-s]').forEach(el => el.addEventListener('change', () => {
     const k = el.dataset.s;
@@ -196,6 +199,45 @@ async function renderSettingsTab() {
     if (k === 'liveIssues') applyDiagnostics();
     $('#st-note').textContent = 'Changes are applied immediately.';
   }));
+}
+
+// Settings ▸ License: the key on this PC and Deactivate (frees the key for any PC), or a field to paste a key
+function renderLicenseTab(host, st) {
+  const when = iso => (iso ? new Date(iso).toLocaleString(PL ? 'pl-PL' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+  const card = (badge, cls, lines) => `<div class="st-lic-card"><div class="welcome-icon"></div><div><b>WinSwift Studio</b> <span class="st-lic-badge ${cls}">${esc(badge)}</span>${lines}</div></div>`;
+  if (st.status === 'disabled') {
+    host.innerHTML = `<div class="st-license">${card(L('Wersja deweloperska', 'Developer build'), 'ok', `<div class="st-note">${esc(L('Uruchomiono ze źródeł — licencja nie jest wymagana.', 'Running from source — no license needed.'))}</div>`)}</div>`;
+    return;
+  }
+  if (st.status === 'licensed') {
+    host.innerHTML = `<div class="st-license">
+      ${card(L('Aktywna', 'Active'), 'ok', `<div class="st-note">${esc(L('Działa na zawsze, także bez internetu.', 'Works forever, offline too.'))}</div>`)}
+      <div class="st-grid">
+        <label>${esc(L('Klucz', 'Key'))}</label><div class="st-note" style="font-family:var(--font-code)">${esc(st.key || '')}</div>
+        <label>${esc(L('Komputer', 'This PC'))}</label><div>${esc(st.licensedTo || st.deviceName)}</div>
+        <label>${esc(L('Aktywowano', 'Activated'))}</label><div>${esc(when(st.activatedAt))}</div>
+        <div class="st-h">${esc(L('Przeniesienie na inny komputer', 'Move to another PC'))}</div>
+        <label></label><div class="st-note">${esc(L('Klucz działa na jednym komputerze naraz. Dezaktywuj go tutaj, a potem wklej na innym komputerze (albo ponownie na tym).', 'A key works on one PC at a time. Deactivate it here, then paste it on another PC (or on this one again).'))}</div>
+        <label></label><div><button class="btn" data-a="deactivate">${esc(L('Dezaktywuj na tym komputerze…', 'Deactivate on This PC…'))}</button> <button class="btn" data-a="profile">${esc(L('Mój profil w sklepie', 'My Shop Profile'))}</button></div>
+        <label></label><div class="form-error" id="st-lic-err"></div>
+      </div></div>`;
+    host.querySelector('[data-a=deactivate]').onclick = e => deactivateLicense(e.currentTarget, $('#st-lic-err'));
+  } else {
+    const [badge, cls, note] = st.status === 'trial'
+      ? [L(`Wersja próbna · ${minutesLeft(st)} min`, `Trial · ${minutesLeft(st)} min left`), 'trial', L('Wklej klucz licencyjny, żeby korzystać bez ograniczeń.', 'Paste a license key to unlock the app for good.')]
+      : [L('Nieaktywna', 'Not activated'), 'off', st.dropped ? droppedText(st.dropped) : L('Wklej klucz licencyjny ze swojego profilu w sklepie.', 'Paste the license key from your profile in the shop.')];
+    host.innerHTML = `<div class="st-license">
+      ${card(badge, cls, `<div class="st-note">${esc(note)}</div>`)}
+      <div class="lic-form"><input id="st-lic-code" spellcheck="false" autocomplete="off" maxlength="2000" placeholder="WS1-…"><button class="btn primary" data-a="activate">${esc(L('Aktywuj', 'Activate'))}</button></div>
+      <div class="form-error" id="st-lic-err"></div>
+      <div><button class="btn" data-a="buy">${esc(L('Kup licencję', 'Buy a License'))}</button> <button class="btn" data-a="profile">${esc(L('Mój profil w sklepie', 'My Shop Profile'))}</button></div>
+    </div>`;
+    const input = host.querySelector('#st-lic-code'), btn = host.querySelector('[data-a=activate]');
+    btn.onclick = () => activateCode(input, $('#st-lic-err'), btn);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') btn.click(); });
+    host.querySelector('[data-a=buy]').onclick = () => api.openExternal(`${SHOP}/buy.php`);
+  }
+  host.querySelector('[data-a=profile]').onclick = () => api.openExternal(`${SHOP}/profile.php`);
 }
 
 function renderKeyBindings(host) {

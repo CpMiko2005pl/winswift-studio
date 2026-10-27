@@ -126,8 +126,9 @@ body { font: 13px "Segoe UI", system-ui, sans-serif; color: #ddd; user-select: n
 .hstack > .divider { width: .5px; align-self: stretch; }
 .text { white-space: pre-wrap; overflow-wrap: break-word; min-width: 0; text-align: inherit; }
 /* SwiftUI's HStack offers every child an equal share; a short Text keeps its natural width and the rest goes to the
-   long one, which wraps (HStack { Text("Address:"); Text(longAddress) }) — instead of squeezing both by their length */
-.hstack > .text { flex: 1 1 0%; max-width: max-content; }
+   long one, which wraps (HStack { Text("Address:"); Text(longAddress) }) — instead of squeezing both by their length.
+   The big grow factor lets texts reach their natural width before a Spacer (flex 1) gets what's left, like SwiftUI. */
+.hstack > .text { flex: 1000 1 0%; max-width: max-content; }
 .color, .shape { flex: 1 1 auto; align-self: stretch; min-width: 0; min-height: 0; }
 .group { display: contents; }
 
@@ -332,7 +333,7 @@ textarea.field { font: inherit; line-height: 1.3; }
 .asheet .opt + .opt { border-top: .5px solid var(--separator); }
 .asheet .opt.destructive { color: var(--red); }
 .asheet .cancelg .opt { font-weight: 600; }
-.popmenu { position: absolute; min-width: 220px; max-width: 280px; background: var(--alert-bg); backdrop-filter: blur(30px); border-radius: 13px; box-shadow: 0 10px 40px rgba(0,0,0,.25); overflow: hidden; animation: fade .15s; }
+.popmenu { position: absolute; z-index: 1000; min-width: 220px; max-width: 280px; background: var(--alert-bg); backdrop-filter: blur(30px); border-radius: 13px; box-shadow: 0 10px 40px rgba(0,0,0,.25); overflow: hidden; animation: fade .15s; }
 .popmenu .mi { display: flex; align-items: center; gap: 10px; padding: 11px 16px; font-size: 17px; color: var(--label); }
 .popmenu .mi + .mi { border-top: .5px solid var(--separator); }
 .popmenu .mi:active { background: var(--fill3); }

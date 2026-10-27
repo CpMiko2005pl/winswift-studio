@@ -4,10 +4,15 @@
 // Apple-only spellings that have to change to build on Windows (line numbers are kept).
 const APPLE_IMPORTS = /^([ \t]*(?:@preconcurrency\s+|@_exported\s+)?import\s+)(UIKit|Combine|CoreLocation|CoreLocationUI|MapKit|AVFoundation|PhotosUI)\b/gm;
 
+// @objc / @objc(name) / @objcMembers: Swift on Windows has no Objective-C runtime and rejects them
+const OBJC_ATTR = /@objc(?:Members)?\b(?:[ \t]*\([^)\n]*\))?/g;
+
 function rewriteForWindows(src, state) {
   let out = src.replace(APPLE_IMPORTS, '$1SwiftUI');
   // no Objective-C runtime: #selector(Foo.bar) becomes a plain Selector value
   out = out.replace(/#selector\(\s*([^()]*(?:\([^()]*\))?[^()]*)\)/g, (_m, s) => `Selector("${s.replace(/"/g, '')}")`);
+  // …and the attributes go, replaced by spaces so lines and columns of the issues stay where they were
+  out = replaceInCode(out, OBJC_ATTR, m => ' '.repeat(m.length));
   // Swift can only override in an extension through Objective-C. `extension UIWindow { override func motionEnded… }`
   // (the shake recipe) therefore becomes a UIWindow subclass that SwiftCode installs as the app's window.
   const re = /\bextension\s+(UIWindow|UIResponder)\b[^{]*\{/g;
@@ -25,6 +30,46 @@ function rewriteForWindows(src, state) {
     out = out.slice(0, m.index) + header + out.slice(open + 1);
     re.lastIndex = m.index + header.length;
   }
+  return out;
+}
+
+/** End (exclusive) of the one-line string literal starting at `start`, stepping over \(interpolations("with strings")). */
+function stringEnd(src, start) {
+  let j = start + 1;
+  while (j < src.length && src[j] !== '"' && src[j] !== '\n') {
+    if (src[j] === '\\' && src[j + 1] === '(') {
+      let depth = 0;
+      for (j += 1; j < src.length && src[j] !== '\n'; j++) {
+        if (src[j] === '"') { j = stringEnd(src, j) - 1; continue; }
+        if (src[j] === '(') depth++;
+        else if (src[j] === ')' && --depth === 0) break;
+      }
+      j++;
+      continue;
+    }
+    if (src[j] === '\\') j++;
+    j++;
+  }
+  return Math.min(j + 1, src.length);
+}
+
+/** Runs a regex replacement only on code — string literals ("…", """…""") and comments are left as they are. */
+function replaceInCode(src, re, fn) {
+  let out = '', code = '', i = 0;
+  const flush = () => { out += code.replace(re, fn); code = ''; };
+  while (i < src.length) {
+    const c = src[i];
+    let end = -1;
+    if (src.startsWith('"""', i)) { const e = src.indexOf('"""', i + 3); end = e < 0 ? src.length : e + 3; }
+    else if (c === '"') end = stringEnd(src, i);
+    else if (c === '/' && src[i + 1] === '/') { const e = src.indexOf('\n', i); end = e < 0 ? src.length : e; }
+    else if (c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); end = e < 0 ? src.length : e + 2; }
+    if (end < 0) { code += c; i++; continue; }
+    flush();
+    out += src.slice(i, end);
+    i = end;
+  }
+  flush();
   return out;
 }
 
@@ -94,4 +139,4 @@ function parseStrings(text) {
 }
 
 
-module.exports = { rewriteForWindows, matchingBrace, parseStrings };
+module.exports = { rewriteForWindows, matchingBrace, replaceInCode, parseStrings };

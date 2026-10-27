@@ -14,7 +14,38 @@ const LSP = {
 const LSP_SEVERITY = { 1: 'error', 2: 'warning', 3: 'note', 4: 'note' };
 
 // diagnostics that only exist because SwiftCode isn't Xcode (the build handles these itself)
-const LSP_NOISE = [/macro ['‘]?Preview['’]?/i, /No macro named 'Preview'/i, /external macro implementation type .*Preview/i];
+const LSP_NOISE = [/macro ['‘]?Preview['’]?/i, /No macro named 'Preview'/i, /external macro implementation type .*Preview/i,
+  // NSTextCheckingResult.CheckingType.link / .phoneNumber…: deprecated in the Windows Foundation, but SwiftCode's NSDataDetector returns them
+  /is deprecated: These types of result will not be returned by swift-corelibs-foundation/i];
+// Windows has no Objective-C runtime: the build drops @objc and turns `extension UIWindow { override func motionEnded… }`
+// (the shake recipe) into a UIWindow subclass. SourceKit still reads the original code, so it would flag exactly that.
+const LSP_OBJC = /Objective-C interoperability is disabled/i;
+const LSP_EXT_OVERRIDE = /cannot be overridden from extension|declared in extension cannot be overridden|declarations in extensions cannot override/i;
+
+/** 1-based line spans of `extension UIWindow {…}` / `extension UIResponder {…}` blocks (the ones the build rewrites). */
+function windowExtensionSpans(text) {
+  const spans = [];
+  const re = /\bextension\s+(?:UIWindow|UIResponder)\b[^{]*\{/g;
+  const lineAt = k => text.slice(0, k).split('\n').length;
+  let m;
+  while ((m = re.exec(text))) {
+    let depth = 0, i = m.index + m[0].length - 1;
+    for (; i < text.length; i++) {
+      if (text[i] === '{') depth++;
+      else if (text[i] === '}' && --depth === 0) break;
+    }
+    spans.push([lineAt(m.index), lineAt(i)]);
+    re.lastIndex = i;
+  }
+  return spans;
+}
+
+function windowsOnlyIssue(d, spans) {
+  if (LSP_OBJC.test(d.message)) return true;
+  if (!LSP_EXT_OVERRIDE.test(d.message)) return false;
+  const line = d.range.start.line + 1;
+  return spans.some(([a, b]) => line >= a && line <= b);
+}
 
 function fileUri(p) {
   const parts = p.replace(/\\/g, '/').split('/');
@@ -151,7 +182,9 @@ function onLspDiagnostics(p) {
   const file = uriToPath(p.uri);
   if (!file) return;
   const key = norm(file);
-  const raw = (p.diagnostics || []).filter(d => !LSP_NOISE.some(re => re.test(d.message)));
+  const open = S.docs.get(docKey(file));
+  const spans = open && open.model && !open.model.isDisposed() ? windowExtensionSpans(open.model.getValue()) : [];
+  const raw = (p.diagnostics || []).filter(d => !LSP_NOISE.some(re => re.test(d.message)) && !windowsOnlyIssue(d, spans));
   LSP.raw.set(key, raw);
   LSP.diags.set(key, raw.map(d => ({
     file, line: d.range.start.line + 1, col: d.range.start.character + 1,

@@ -1299,6 +1299,9 @@ function renderOverlays() {
     box.appendChild(ab);
     overlayRoot.appendChild(box);
   }
+  // each layer stacks above the ones opened before it: views inside a sheet use z-index too, and without this an alert
+  // shown from a sheet (a form's validation alert) slipped under the sheet's content
+  [...overlayRoot.children].forEach((el, i) => { el.style.zIndex = String(i + 1); });
   screenEl.classList.toggle('sheet-open', sheetOpen);
 }
 

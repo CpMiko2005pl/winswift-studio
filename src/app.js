@@ -191,7 +191,7 @@ async function ensureDoc(p) {
   const model = monaco.editor.getModel(uri) || monaco.editor.createModel(r.content, languageFor(p), uri);
   model.updateOptions({ tabSize: setting('tabWidth') || 4, indentSize: setting('tabWidth') || 4, insertSpaces: setting('insertSpaces') !== false });
   doc = { key, kind: 'file', path: p, model, saved: model.getAlternativeVersionId(), viewState: null, issueDecos: [], insertSpaces: true };
-  model.onDidChangeContent(() => onDocChanged(doc));
+  model.onDidChangeContent(e => onDocChanged(doc, e));
   S.docs.set(key, doc);
   applyDiagsToDoc(doc);
   renderBreakpointDecorations(doc);
@@ -201,7 +201,8 @@ async function ensureDoc(p) {
 
 const isDirty = doc => doc.kind === 'file' && doc.model.getAlternativeVersionId() !== doc.saved;
 
-function onDocChanged(doc) {
+function onDocChanged(doc, e) {
+  noteIssueEdit(doc, e);
   const wasDirty = doc._dirty;
   doc._dirty = isDirty(doc);
   if (S.previewTab === doc.key && doc._dirty) { S.previewTab = null; renderTabs(); }
@@ -1228,24 +1229,79 @@ function applyDiagsToDoc(doc) {
     const prev = byLine.get(d.line);
     if (!prev || (d.severity === 'error' && prev.severity !== 'error')) byLine.set(d.line, d);
   }
-  const decos = [...byLine.values()].map(d => {
-    const line = Math.min(d.line, lines);
-    const sev = d.severity === 'error' ? 'error' : 'warning';
+  setIssueDecos(doc, [...byLine.values()].map(d => {
     const more = list.filter(x => x.line === d.line).length - 1;
     return {
-      range: new monaco.Range(line, 1, line, model.getLineMaxColumn(line)),
-      options: {
-        isWholeLine: true,
-        className: `xc-line-${sev}`,
-        glyphMarginClassName: `xc-glyph-${sev}`,
-        glyphMarginHoverMessage: { value: list.filter(x => x.line === d.line).map(x => x.message).join('\n\n') },
-        after: { content: d.message + (more > 0 ? `  (+${more})` : ''), inlineClassName: `xc-inline-${sev}` },
-        overviewRuler: { color: sev === 'error' ? '#ff453a' : '#ffd60a', position: monaco.editor.OverviewRulerLane.Right },
-        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+      line: Math.min(d.line, lines),
+      info: {
+        sev: d.severity === 'error' ? 'error' : 'warning',
+        text: d.message + (more > 0 ? `  (+${more})` : ''),
+        hover: list.filter(x => x.line === d.line).map(x => x.message).join('\n\n'),
       },
     };
+  }));
+}
+
+// Like Xcode, the line you're typing on keeps quiet until you pause: no banner over the half-written word,
+// and the banner never sits in the middle of the text you're adding at the end of the line.
+const ISSUE_QUIET_MS = 1500;
+
+function issueLinesBeingTyped(doc) {
+  return doc.editAt && Date.now() - doc.editAt < ISSUE_QUIET_MS ? doc.editLines : null;
+}
+
+/** items: [{ line, info: { sev, text, hover } }] — one whole-line decoration each, with the banner after the line's end. */
+function setIssueDecos(doc, items) {
+  const model = doc.model;
+  const typing = issueLinesBeingTyped(doc);
+  const decos = items.map(({ line, info }) => {
+    const quiet = !!typing && typing.has(line);
+    const options = {
+      isWholeLine: true,
+      glyphMarginClassName: `xc-glyph-${info.sev}`,
+      glyphMarginHoverMessage: { value: info.hover },
+      overviewRuler: { color: info.sev === 'error' ? '#ff453a' : '#ffd60a', position: monaco.editor.OverviewRulerLane.Right },
+      stickiness: monaco.editor.TrackedRangeStickiness.AlwaysGrowsWhenTypingAtEdges,
+    };
+    if (!quiet) {
+      options.className = `xc-line-${info.sev}`;
+      options.after = { content: info.text, inlineClassName: `xc-inline-${info.sev}`, cursorStops: monaco.editor.InjectedTextCursorStops?.None };
+    }
+    return { range: new monaco.Range(line, 1, line, model.getLineMaxColumn(line)), options };
   });
   doc.issueDecos = model.deltaDecorations(doc.issueDecos || [], decos);
+  doc.issueItems = items.map((it, k) => ({ id: doc.issueDecos[k], info: it.info }));
+}
+
+/** After an edit: rebuild the banners from where Monaco tracked them (the issue list's line numbers predate the edit). */
+function refreshIssueDecos(doc) {
+  if (!doc.issueItems || !doc.issueItems.length || doc.model.isDisposed()) return;
+  const lines = doc.model.getLineCount();
+  const byLine = new Map();   // deleting a line can push two issues onto one: the error wins
+  for (const { id, info } of doc.issueItems) {
+    const r = doc.model.getDecorationRange(id);
+    if (!r) continue;
+    const line = Math.min(r.startLineNumber, lines);
+    const prev = byLine.get(line);
+    if (!prev || (info.sev === 'error' && prev.info.sev !== 'error')) byLine.set(line, { line, info });
+  }
+  setIssueDecos(doc, [...byLine.values()]);
+}
+
+function noteIssueEdit(doc, e) {
+  if (!e || !e.changes || !e.changes.length) return;
+  const lines = new Set();
+  for (const c of e.changes) {
+    const added = (c.text.match(/\n/g) || []).length;
+    for (let l = c.range.startLineNumber; l <= c.range.startLineNumber + added; l++) lines.add(l);
+  }
+  doc.editLines = lines;
+  doc.editAt = Date.now();
+  if (doc.issueItems && doc.issueItems.length) {
+    refreshIssueDecos(doc);
+    clearTimeout(doc.quietTimer);
+    doc.quietTimer = setTimeout(() => refreshIssueDecos(doc), ISSUE_QUIET_MS + 50);
+  }
 }
 
 function clearDiagnostics() {

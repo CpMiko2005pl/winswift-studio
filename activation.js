@@ -21,6 +21,10 @@ const PUBLIC_KEY = crypto.createPublicKey({
   key: Buffer.from((DEV && process.env.SWIFTCODE_LICENSE_PUBKEY) || 'MCowBQYDK2VwAyEA8NcPiLs0a9zdgtQ3O93pPzbvBnIVMjWxpFSb0XnFcMc=', 'base64'),
   format: 'der', type: 'spki',
 });
+// a universal key (WSU-<payload>.<signature>) is signed offline by the owner with the activation signing key: it works on
+// any number of PCs, needs no server and never expires; a leaked one is blocked by adding its id here in a later version
+const REVOKED_UNIVERSAL = [];
+const UNIVERSAL_RE = /^WSU-([A-Za-z0-9_-]{20,600})\.([A-Za-z0-9_-]{86})$/;
 const TRIAL_MINUTES = 15;
 const TICK = 5000;
 const TRIAL_RECHECK = 60 * 1000;          // the shop is asked again every minute while the trial runs
@@ -92,9 +96,28 @@ function verify(lic, key) {
   } catch { return null; }
 }
 
+// the signed payload of a universal key: { v: 3, t: 'universal', id, name, at[, exp] } — no device in it
+function verifyUniversal(code) {
+  const m = UNIVERSAL_RE.exec(String(code || '').trim());
+  if (!m) return null;
+  try {
+    const payload = Buffer.from(m[1], 'base64url');
+    if (!crypto.verify(null, payload, PUBLIC_KEY, Buffer.from(m[2], 'base64url'))) return null;
+    const p = JSON.parse(payload.toString('utf8'));
+    if (p.v !== 3 || p.t !== 'universal' || typeof p.id !== 'string' || REVOKED_UNIVERSAL.includes(p.id)) return null;
+    if (p.exp && !(Date.now() < Date.parse(p.exp))) return null;
+    return p;
+  } catch { return null; }
+}
+
 function loadLicense() {
   const rec = readJson(licenseFile());
   if (!rec) return null;
+  if (rec.universal) {
+    const code = unprotect(rec);
+    const p = verifyUniversal(code);
+    return p ? { p, code, universal: true, at: rec.at } : null;
+  }
   const key = normKey(unprotect(rec) || '');
   const p = verify(rec, key);
   return p ? { p, key } : null;
@@ -113,7 +136,12 @@ function state() {
   const s = status();
   const out = { status: s, dev: DEV, deviceName: os.hostname(), trialMinutes: TRIAL_MINUTES, shop: SHOP };
   if (trial) out.remaining = Math.max(0, Math.ceil((trial.expiresAt - Date.now()) / 1000));
-  if (license) {
+  if (license && license.universal) {
+    out.universal = true;
+    out.key = `WSU-…-${license.p.id}`;
+    out.activatedAt = license.at;
+    out.licensedTo = license.p.name;
+  } else if (license) {
     const k = license.key;
     out.key = k ? `WS1-${k.slice(3, 11)}-…-${k.slice(-8)}` : 'WS1-…';
     out.activatedAt = license.p.at;
@@ -187,6 +215,7 @@ async function recheckTrial() {
 async function activate(input) {
   if (!ENABLED) return { ok: true };
   const text = String(input || '').trim();
+  if (text.startsWith('WSU-')) return activateUniversal(text);   // before the trial check: WSU-x.y also looks like a token
   if (isTrialToken(text)) return startTrial(text);
   const key = normKey(text);
   if (!key) return { ok: false, error: 'format' };
@@ -202,8 +231,21 @@ async function activate(input) {
   return { ok: true };
 }
 
+// checked offline: no server, no binding to this PC
+function activateUniversal(code) {
+  const p = verifyUniversal(code);
+  if (!p) return { ok: false, error: 'universal_invalid' };
+  const at = new Date().toISOString();
+  writeJson(licenseFile(), { universal: true, at, ...protect(code) });
+  license = { p, code, universal: true, at };
+  droppedReason = null;
+  changed();
+  return { ok: true, universal: true };
+}
+
 async function deactivate() {
   if (!license) return { ok: true };
+  if (license.universal) { dropLicense(null); return { ok: true }; }   // nothing to free on the server
   if (!license.key) return { ok: false, error: 'nokey' };
   const r = await broker('deactivate', { license_key: license.key });
   // the server must free the key first — otherwise it would stay locked to this PC

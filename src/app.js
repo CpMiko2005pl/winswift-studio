@@ -1849,6 +1849,7 @@ function licenseError(r) {
   return ({
     format: L('To nie wygląda na klucz licencyjny (WS1-…) ani na token próbny. Skopiuj go w całości ze swojego profilu w sklepie.', 'This doesn’t look like a license key (WS1-…) or a trial token. Copy it in full from your profile in the shop.'),
     invalid: L('Nie ma takiego klucza licencyjnego. Sprawdź, czy skopiowałeś go w całości.', 'There is no such license key. Check that you copied all of it.'),
+    universal_invalid: L('Ten klucz uniwersalny jest nieprawidłowy albo został zablokowany. Sprawdź, czy skopiowałeś go w całości.', 'This universal key is not valid or has been blocked. Check that you copied all of it.'),
     trial_invalid: L('Token próbny jest nieprawidłowy albo już wygasł. Okres próbny można uruchomić raz na konto.', 'The trial token is not valid or has already expired. Each account gets one trial.'),
     revoked: L('Ta licencja została wyłączona w sklepie. Napisz do obsługi sklepu.', 'This license has been switched off in the shop. Contact the shop’s support.'),
     upstream: L('Sklep z licencjami chwilowo nie odpowiada. Spróbuj za kilka minut.', 'The license shop is not responding right now. Try again in a few minutes.'),
@@ -1974,16 +1975,21 @@ $('#lic-quit').onclick = () => api.quit();
 $('#lic-help').onclick = () => api.openExternal(`${SHOP}/profile.php`);
 
 async function deactivateLicense(button, noteEl) {
-  const ok = await api.confirm(L('Dezaktywować licencję na tym komputerze?', 'Deactivate the license on this PC?'),
-    L('Klucz zostanie zwolniony i będzie go można aktywować ponownie — na tym albo innym komputerze. Do tego czasu WinSwift Studio na tym komputerze będzie wymagał klucza.',
-      'The key is released and can be activated again — on this or another PC. Until then WinSwift Studio on this PC asks for a key.'),
-    [L('Dezaktywuj', 'Deactivate'), L('Anuluj', 'Cancel')]);
+  const universal = !!(S.license && S.license.universal);
+  const ok = await api.confirm(universal ? L('Usunąć klucz uniwersalny z tego komputera?', 'Remove the universal key from this PC?') : L('Dezaktywować licencję na tym komputerze?', 'Deactivate the license on this PC?'),
+    universal
+      ? L('Klucz uniwersalny dalej działa na innych komputerach. Na tym WinSwift Studio będzie wymagał klucza, dopóki go znowu nie wkleisz.',
+        'The universal key keeps working on other PCs. On this PC WinSwift Studio asks for a key until you paste it again.')
+      : L('Klucz zostanie zwolniony i będzie go można aktywować ponownie — na tym albo innym komputerze. Do tego czasu WinSwift Studio na tym komputerze będzie wymagał klucza.',
+        'The key is released and can be activated again — on this or another PC. Until then WinSwift Studio on this PC asks for a key.'),
+    [universal ? L('Usuń', 'Remove') : L('Dezaktywuj', 'Deactivate'), L('Anuluj', 'Cancel')]);
   if (ok !== 0) return;
   button.disabled = true;
   const r = await api.deactivate();
   button.disabled = false;
   if (!r.ok) { noteEl.textContent = licenseError(r); return; }
-  toast(L('Licencja dezaktywowana — klucz możesz teraz aktywować na dowolnym komputerze.', 'License deactivated — you can now activate the key on any PC.'), 6000);
+  toast(universal ? L('Klucz uniwersalny usunięty z tego komputera.', 'Universal key removed from this PC.')
+    : L('Licencja dezaktywowana — klucz możesz teraz aktywować na dowolnym komputerze.', 'License deactivated — you can now activate the key on any PC.'), 6000);
   onLicense(await api.licenseState());
 }
 

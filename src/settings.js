@@ -209,7 +209,19 @@ function renderLicenseTab(host, st) {
     host.innerHTML = `<div class="st-license">${card(L('Wersja deweloperska', 'Developer build'), 'ok', `<div class="st-note">${esc(L('Uruchomiono ze źródeł — licencja nie jest wymagana.', 'Running from source — no license needed.'))}</div>`)}</div>`;
     return;
   }
-  if (st.status === 'licensed') {
+  if (st.status === 'licensed' && st.universal) {
+    host.innerHTML = `<div class="st-license">
+      ${card(L('Uniwersalna', 'Universal'), 'ok', `<div class="st-note">${esc(L('Działa na dowolnej liczbie komputerów, na zawsze, także bez internetu.', 'Works on any number of PCs, forever, offline too.'))}</div>`)}
+      <div class="st-grid">
+        <label>${esc(L('Klucz', 'Key'))}</label><div class="st-note" style="font-family:var(--font-code)">${esc(st.key || '')}</div>
+        <label>${esc(L('Licencja', 'License'))}</label><div>${esc(st.licensedTo || '—')}</div>
+        <label>${esc(L('Komputer', 'This PC'))}</label><div>${esc(st.deviceName)}</div>
+        <label>${esc(L('Aktywowano', 'Activated'))}</label><div>${esc(when(st.activatedAt))}</div>
+        <label></label><div><button class="btn" data-a="deactivate">${esc(L('Usuń z tego komputera…', 'Remove from This PC…'))}</button> <button class="btn" data-a="profile">${esc(L('Mój profil w sklepie', 'My Shop Profile'))}</button></div>
+        <label></label><div class="form-error" id="st-lic-err"></div>
+      </div></div>`;
+    host.querySelector('[data-a=deactivate]').onclick = e => deactivateLicense(e.currentTarget, $('#st-lic-err'));
+  } else if (st.status === 'licensed') {
     host.innerHTML = `<div class="st-license">
       ${card(L('Aktywna', 'Active'), 'ok', `<div class="st-note">${esc(L('Działa na zawsze, także bez internetu.', 'Works forever, offline too.'))}</div>`)}
       <div class="st-grid">

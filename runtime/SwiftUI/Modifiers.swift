@@ -166,8 +166,16 @@ extension View {
     public func badge(_ count: Int) -> some View { _mod("badge", ["v": count == 0 ? .null : .s(String(count))]) }
     public func badge(_ label: String?) -> some View { _mod("badge", ["v": label.map { .s($0) } ?? .null]) }
     public func symbolVariant(_ v: SymbolVariants) -> some View { _mod("symbolVariant", ["v": .s(v.name)]) }
-    public func symbolEffect<E>(_ effect: E, options: Int = 0, value: some Equatable) -> some View { self }
-    public func symbolEffect<E>(_ effect: E, options: Int = 0, isActive: Bool = true) -> some View { self }
+    /// `.symbolEffect(.bounce, value: x)` — accepted; the simulator plays a short pulse when `value` changes.
+    public func symbolEffect(_ effect: SymbolEffect, options: SymbolEffectOptions = .default, value: some Equatable) -> some View {
+        _mod("symbolEffect", ["fx": .s(effect.name), "v": .s(String(describing: value))])
+    }
+    public func symbolEffect(_ effect: SymbolEffect, options: SymbolEffectOptions = .default, isActive: Bool = true) -> some View {
+        _mod("symbolEffect", ["fx": .s(effect.name), "active": .b(isActive)])
+    }
+    public func symbolEffectsRemoved(_ isEnabled: Bool = true) -> some View { self }
+    /// `.contentTransition(.numericText())` — accepted (the simulator swaps content without animating).
+    public func contentTransition(_ transition: ContentTransition) -> some View { self }
     public func imageScale(_ scale: Image.Scale) -> some View {
         _mod("imageScale", ["v": .s(scale == .small ? "small" : scale == .large ? "large" : "medium")])
     }
@@ -175,7 +183,6 @@ extension View {
     public func privacySensitive(_ s: Bool = true) -> some View { self }
 }
 
-public struct FillStyle: Sendable { public init(eoFill: Bool = false, antialiased: Bool = true) {} }
 public struct RedactionReasons: OptionSet, Sendable {
     public let rawValue: Int
     public init(rawValue: Int) { self.rawValue = rawValue }

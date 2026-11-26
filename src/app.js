@@ -3062,6 +3062,16 @@ api.on('app:before-close', async () => {
   if (await confirmDiscardAll()) api.closeConfirmed();
 });
 
+// a second launch (Open With…, a shortcut, a double-clicked .swift file) hands its path to this window
+api.on('app:openPath', async target => {
+  if (!target || !target.folder) return;
+  if (S.root && norm(S.root) === norm(target.folder)) {
+    if (target.file) await openFile(target.file, { focus: true });
+    return;
+  }
+  await openProject(target.folder, { file: target.file });
+});
+
 // ======================================================================== init
 
 async function init() {

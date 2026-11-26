@@ -7,7 +7,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
 const { spawn, execFile } = require('child_process');
-const { rewriteForWindows, parseStrings } = require('./buildtools');
+const { rewriteForWindows, parseStrings, codeMask, literalEnd } = require('./buildtools');
 const license = require('./activation.js');   // not './license' — on Windows that finds the LICENSE file
 const updater = require('./updater');
 
@@ -738,7 +738,7 @@ const SWIFTUI_SRC = path.join(__dirname, 'runtime', 'SwiftUI');
 
 // Apple frameworks whose API lives in SwiftCode's SwiftUI module. Each gets a tiny module that re-exports SwiftUI,
 // so `import UIKit` resolves for SourceKit exactly like the build's import rewriting does.
-const APPLE_STUB_MODULES = ['UIKit', 'Combine', 'CoreLocation', 'CoreLocationUI', 'MapKit', 'AVFoundation', 'PhotosUI'];
+const APPLE_STUB_MODULES = ['UIKit', 'Combine', 'CoreLocation', 'CoreLocationUI', 'MapKit', 'AVFoundation', 'PhotosUI', 'Charts'];
 
 let runtimeBuild = null;   // in-flight runtime build, shared by the build and SourceKit
 
@@ -795,17 +795,21 @@ function stripPreviews(src) {
   const chars = src.split('');
   const previews = [];
   const re = /#Preview\b/g;
+  // a commented-out `// #Preview { … }` (or one inside a string) must stay as it is: blanking from there
+  // to some later `}` would cut real code out of the file
+  const inCode = codeMask(src);
   let m;
   while ((m = re.exec(src))) {
+    if (!inCode[m.index]) continue;
     let i = m.index + m[0].length;
     const skipWs = () => { while (i < src.length && /\s/.test(src[i])) i++; };
     const matchBlock = (open, close) => {
       let depth = 0;
       for (; i < src.length; i++) {
         const c = src[i];
-        if (c === '"') { i++; while (i < src.length && src[i] !== '"') { if (src[i] === '\\') i++; i++; } continue; }
-        if (c === '/' && src[i + 1] === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
-        if (c === '/' && src[i + 1] === '*') { i = src.indexOf('*/', i + 2); if (i < 0) i = src.length; i++; continue; }
+        // strings ("…", """…""", #"…"#) and comments don't count
+        const end = (c === '"' || c === '/' || c === '#') ? literalEnd(src, i) : -1;
+        if (end > i) { i = end - 1; continue; }
         if (c === open) depth++;
         else if (c === close) { depth--; if (depth === 0) { i++; return true; } }
       }
@@ -1569,14 +1573,22 @@ function runIOSApp(exe, root, appName, debugRun, launch = {}) {
       buf += d;
       let i;
       while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i).replace(/\r$/, '');
+        let line = buf.slice(0, i).replace(/\r$/, '');
         buf = buf.slice(i + 1);
+        // print("…", terminator: "") right before a frame arrives in the same chunk: split the console text off
+        const mark = line.indexOf('\u001e');
+        if (mark > 0 && /^\u001e(UI|RQ) /.test(line.slice(mark))) { ev('stdout', { text: line.slice(0, mark) }); line = line.slice(mark); }
         if (line.startsWith(UI_MARK)) simSend('sim:frame', line.slice(UI_MARK.length));
         else if (line.startsWith('\u001eRQ ')) { try { handleAppRequest(JSON.parse(line.slice(4)), appName); } catch {} }
         else ev('stdout', { text: line + '\n' });
       }
       // partial console output (print without newline) shows up immediately; frames always end with \n
-      if (buf && !buf.startsWith('\u001e')) { ev('stdout', { text: buf }); buf = ''; }
+      // (only up to a frame that has started arriving)
+      if (buf && buf[0] !== '\u001e') {
+        const mk = buf.indexOf('\u001e');
+        ev('stdout', { text: mk < 0 ? buf : buf.slice(0, mk) });
+        buf = mk < 0 ? '' : buf.slice(mk);
+      }
     });
     proc.stderr.on('data', d => ev('stderr', { text: d }));
     proc.on('error', e => ev('stderr', { text: String(e) + '\n' }));
@@ -1861,11 +1873,13 @@ async function canvasStart({ root, file, index = 0, scheme, overrides }) {
     buf += d;
     let i;
     while ((i = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, i).replace(/\r$/, '');
+      let line = buf.slice(0, i).replace(/\r$/, '');
       buf = buf.slice(i + 1);
+      const mark = line.indexOf(UI_MARK);
+      if (mark > 0) line = line.slice(mark);
       if (line.startsWith(UI_MARK)) canvasEvent({ type: 'frame', seq, json: line.slice(UI_MARK.length) });
     }
-    if (buf && !buf.startsWith('\u001e')) buf = '';
+    if (buf && buf[0] !== '\u001e') { const mk = buf.indexOf('\u001e'); buf = mk < 0 ? '' : buf.slice(mk); }
   });
   proc.stderr.on('data', d => { errTail = (errTail + d).slice(-4000); });
   proc.on('error', () => {});
@@ -1886,7 +1900,7 @@ async function writeCompileDatabase(root) {
   const files = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
   if (!files.length) return null;
   const sources = await Promise.all(files.map(f => fsp.readFile(f, 'utf8').catch(() => '')));
-  const ui = sources.some(s => SWIFTUI_IMPORT.test(s) || /^\s*import\s+(UIKit|Combine|CoreLocation|MapKit)\b/m.test(s));
+  const ui = sources.some(s => SWIFTUI_IMPORT.test(s) || /^\s*import\s+(UIKit|Combine|CoreLocation|MapKit|Charts)\b/m.test(s));
   const hasMain = files.some(f => path.basename(f).toLowerCase() === 'main.swift');
   const args = ['swiftc', '-module-name', moduleName(path.basename(root)), ...swiftFlags()];
   if (ui) {
@@ -2336,11 +2350,7 @@ function registerIpc() {
   ipcMain.handle('license:activate', (_e, input) => license.activate(input));
   ipcMain.handle('license:deactivate', () => license.deactivate());
   ipcMain.handle('license:check', () => license.checkOnline());
-  ipcMain.handle('app:initialPath', () => {
-    const p = initialPath();
-    if (!p) return null;
-    return fs.statSync(p).isDirectory() ? { folder: p } : { folder: path.dirname(p), file: p };
-  });
+  ipcMain.handle('app:initialPath', () => openTarget(initialPath()));
   ipcMain.handle('app:eval', (_e, js) => (process.env.SWIFTCODE_DEBUG ? js : null));
   ipcMain.handle('app:quit', () => app.quit());
 }
@@ -2428,13 +2438,34 @@ function createWindow() {
   }
 }
 
-function initialPath() {
-  const args = process.argv.slice(app.isPackaged ? 1 : 2).filter(a => !a.startsWith('-'));
+function initialPath(argv = process.argv, cwd = process.cwd()) {
+  const args = argv.slice(app.isPackaged ? 1 : 2).filter(a => !a.startsWith('-'));
   for (const a of args) {
-    const p = path.resolve(a);
+    const p = path.resolve(cwd, a);
     if (fs.existsSync(p)) return p;
   }
   return null;
+}
+
+function openTarget(p) {
+  if (!p) return null;
+  try { return fs.statSync(p).isDirectory() ? { folder: p } : { folder: path.dirname(p), file: p }; } catch { return null; }
+}
+
+// One WinSwift Studio at a time (they share settings, the simulator and the built runtime): a second launch
+// brings the running window forward and opens what it was asked to open. Test runs (SWIFTCODE_DEBUG) are exempt.
+const secondInstance = !process.env.SWIFTCODE_DEBUG && !app.requestSingleInstanceLock();
+if (secondInstance) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv, cwd) => {
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    const target = openTarget(initialPath(argv, cwd));
+    if (target) send('app:openPath', target);
+  });
 }
 
 Menu.setApplicationMenu(null);
@@ -2443,6 +2474,7 @@ app.setAppUserModelId('local.swiftcode.ide');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 app.whenReady().then(async () => {
+  if (secondInstance) return;
   license.init({ notify: s => send('license:changed', s) });
   registerIpc();
   refreshEnv();

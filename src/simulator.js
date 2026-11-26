@@ -157,6 +157,7 @@ function build(n, ctx) {
     case 'divider': el = div('divider'); if (ctx.axis === 'h') el._V = true; else el._H = true; break;
     case 'color': el = div('color'); el.style.background = n.p.c; el._H = el._V = true; break;
     case 'shape': el = buildShape(n); break;
+    case 'chart': el = buildChart(n); break;
     case 'button': el = buildButton(n, ctx); break;
     case 'navlink': el = buildNavLinkInline(n, ctx); break;
     case 'textfield': el = buildTextField(n, ctx); break;
@@ -296,7 +297,373 @@ function buildGrid(n, ctx) {
   return el;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const FX_SEEN = new Map();   // last value of each .symbolEffect(_, value:) — a change plays the effect
+
+// custom shapes (Shape.path(in:) / Path) and trimmed outlines are SVG paths
+function buildPathShape(n) {
+  const el = div('shape pathshape');
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', n.p.vb || '0 0 100 100');
+  const abs = n.p.ar === 'abs';
+  svg.setAttribute('preserveAspectRatio', abs ? 'xMinYMin meet' : n.p.ar === 'meet' ? 'xMidYMid meet' : 'none');
+  svg.style.overflow = 'visible';
+  svg.style.display = 'block';
+  svg.style.width = '100%';
+  svg.style.height = '100%';
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', n.p.d || '');
+  // colors are CSS (often var(--…)), which only the style properties understand
+  const color = c => (c === 'currentColor' ? 'var(--fg-shape, currentColor)' : c);
+  path.style.fill = n.p.fill ? color(n.p.fill) : 'none';
+  if (n.p.stroke) {
+    path.style.stroke = color(n.p.stroke);
+    path.setAttribute('stroke-width', String(n.p.lw || 1));
+    // the path is drawn in a 100×100 box scaled to the frame: keep the line width in points
+    if (!abs) path.setAttribute('vector-effect', 'non-scaling-stroke');
+    if (n.p.cap) path.setAttribute('stroke-linecap', n.p.cap);
+    if (n.p.join) path.setAttribute('stroke-linejoin', n.p.join);
+    if (n.p.dash && n.p.dash.length) path.setAttribute('stroke-dasharray', n.p.dash.join(' '));
+  }
+  if (n.p.trim) {
+    const [from, to] = n.p.trim;
+    path.setAttribute('pathLength', '1');
+    path.setAttribute('stroke-dasharray', `${Math.max(0, to - from)} 2`);
+    path.setAttribute('stroke-dashoffset', String(-from));
+    // a trimmed filled shape shows nothing in SwiftUI unless it is stroked
+    if (!n.p.stroke && n.p.fill) { path.style.stroke = color(n.p.fill); path.style.fill = 'none'; path.setAttribute('stroke-width', '2'); path.setAttribute('vector-effect', 'non-scaling-stroke'); }
+  }
+  // gradients are CSS backgrounds; SVG paint can't use them, so the gradient is clipped to the path instead
+  if (n.p.fill && /gradient\(/.test(n.p.fill)) {
+    const id = 'clip' + Math.random().toString(36).slice(2);
+    const defs = document.createElementNS(SVG_NS, 'defs');
+    const cp = document.createElementNS(SVG_NS, 'clipPath');
+    cp.setAttribute('id', id);
+    cp.setAttribute('clipPathUnits', 'userSpaceOnUse');
+    const p2 = document.createElementNS(SVG_NS, 'path');
+    p2.setAttribute('d', n.p.d || '');
+    cp.appendChild(p2); defs.appendChild(cp); svg.appendChild(defs);
+    const fo = document.createElementNS(SVG_NS, 'foreignObject');
+    const [, , w, h] = (n.p.vb || '0 0 100 100').split(/\s+/).map(Number);
+    fo.setAttribute('x', '0'); fo.setAttribute('y', '0'); fo.setAttribute('width', String(w)); fo.setAttribute('height', String(h));
+    fo.setAttribute('clip-path', `url(#${id})`);
+    const bg = document.createElement('div');
+    bg.style.width = '100%'; bg.style.height = '100%'; bg.style.background = n.p.fill;
+    fo.appendChild(bg);
+    svg.appendChild(fo);
+    path.style.fill = 'none';
+  }
+  svg.appendChild(path);
+  el.appendChild(svg);
+  if (abs) {
+    el.classList.add('pathabs');
+    el.style.width = (n.p.w || 0) + 'px';
+    el.style.height = (n.p.h || 0) + 'px';
+  } else {
+    el._H = el._V = true;
+  }
+  return el;
+}
+
+// ------------------------------------------------------------------ Swift Charts (drawn as SVG at the laid-out size)
+
+const CHART_PALETTE = ['var(--blue)', 'var(--green)', 'var(--orange)', 'var(--purple)', 'var(--red)', 'var(--teal)', 'var(--yellow)', 'var(--pink)', 'var(--indigo)', 'var(--brown)'];
+
+function buildChart(n) {
+  const el = div('chart');
+  el._H = el._V = true;
+  el.style.minHeight = '180px';
+  el.style.position = 'relative';
+  const draw = () => {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    if (el._drawn === `${w}x${h}`) return;
+    el._drawn = `${w}x${h}`;
+    el.textContent = '';
+    try { drawChart(el, n.p.marks || [], n.p.opts || {}, w, h); } catch (e) { el.textContent = 'Chart: ' + e.message; }
+  };
+  new ResizeObserver(draw).observe(el);
+  requestAnimationFrame(draw);
+  return el;
+}
+
+function chartVal(v) {
+  if (v && typeof v === 'object' && 'date' in v) return { num: v.date, date: true };
+  if (typeof v === 'number') return { num: v };
+  if (typeof v === 'string') return { cat: v };
+  // a mark without this axis (e.g. RuleMark(y:) has no x) takes no part in that axis' scale
+  if (v == null) return {};
+  return { cat: String(v) };
+}
+
+function niceTicks(min, max, count = 5) {
+  if (min === max) { max = min + 1; }
+  const span = max - min;
+  const step0 = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= count) || 10 * mag;
+  const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let t = lo; t <= hi + step / 1e6; t += step) ticks.push(+t.toFixed(10));
+  return { lo, hi, ticks };
+}
+
+function fmtTick(v, date) {
+  if (date) return new Date(v).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (Math.abs(v) >= 1e4) return (v / 1e3).toFixed(0) + 'k';
+  return String(+v.toFixed(2));
+}
+
+function svgEl(tag, attrs, parent) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'style') Object.assign(e.style, v); else e.setAttribute(k, String(v));
+  }
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function drawChart(el, marks, opts, W, H) {
+  const svg = svgEl('svg', { width: W, height: H, style: { display: 'block', overflow: 'visible', font: '11px -apple-system, Inter, sans-serif' } }, el);
+  // series colors: explicit .foregroundStyle wins, then chartForegroundStyleScale, then the palette in order of appearance
+  const seriesNames = [];
+  for (const m of marks) if (m.series != null && !seriesNames.includes(m.series)) seriesNames.push(m.series);
+  const palette = opts.palette || {};
+  const colorOf = m => m.color || (m.series != null ? (palette[m.series] || CHART_PALETTE[seriesNames.indexOf(m.series) % CHART_PALETTE.length]) : CHART_PALETTE[0]);
+  const legend = seriesNames.length > 0 && opts.legend !== false;
+
+  // ---- pie / donut
+  const sectors = marks.filter(m => m.kind === 'sector');
+  if (sectors.length) {
+    const total = sectors.reduce((s, m) => s + Math.max(0, chartVal(m.angle).num || 0), 0) || 1;
+    const legendH = 22 * Math.ceil(sectors.length / 3);
+    const R = Math.max(10, Math.min(W, H - legendH) / 2 - 4), cx = W / 2, cy = (H - legendH) / 2;
+    let a = -Math.PI / 2;
+    sectors.forEach((m, i) => {
+      const v = Math.max(0, chartVal(m.angle).num || 0);
+      const da = (v / total) * Math.PI * 2;
+      const inner = m.inner != null ? (m.innerRatio ? m.inner * R : m.inner) : 0;
+      const a0 = a + (m.inset ? m.inset / R / 2 : 0), a1 = a + da - (m.inset ? m.inset / R / 2 : 0);
+      const large = a1 - a0 > Math.PI ? 1 : 0;
+      const p = (r, t) => `${cx + r * Math.cos(t)} ${cy + r * Math.sin(t)}`;
+      const d = da >= Math.PI * 2 - 1e-6
+        ? `M${p(R, 0)}A${R} ${R} 0 1 1 ${p(R, Math.PI)}A${R} ${R} 0 1 1 ${p(R, 0)}Z` + (inner ? `M${p(inner, 0)}A${inner} ${inner} 0 1 0 ${p(inner, Math.PI)}A${inner} ${inner} 0 1 0 ${p(inner, 0)}Z` : '')
+        : inner
+          ? `M${p(R, a0)}A${R} ${R} 0 ${large} 1 ${p(R, a1)}L${p(inner, a1)}A${inner} ${inner} 0 ${large} 0 ${p(inner, a0)}Z`
+          : `M${cx} ${cy}L${p(R, a0)}A${R} ${R} 0 ${large} 1 ${p(R, a1)}Z`;
+      const color = m.color || (m.series != null ? colorOf(m) : CHART_PALETTE[i % CHART_PALETTE.length]);
+      svgEl('path', { d, 'fill-rule': 'evenodd', style: { fill: color, opacity: m.opacity ?? 1 } }, svg);
+      if (m.note) {
+        const mid = (a0 + a1) / 2, r = inner ? (inner + R) / 2 : R * 0.62;
+        const t = svgEl('text', { x: cx + r * Math.cos(mid), y: cy + r * Math.sin(mid), 'text-anchor': 'middle', 'dominant-baseline': 'middle', style: { fill: '#fff', fontWeight: '600' } }, svg);
+        t.textContent = m.note;
+      }
+      a += da;
+    });
+    // legend: the sector's series (or index)
+    const names = sectors.map((m, i) => m.series ?? String(i + 1));
+    drawLegend(svg, names, (name, i) => sectors[i].color || (sectors[i].series != null ? colorOf(sectors[i]) : CHART_PALETTE[i % CHART_PALETTE.length]), W, H);
+    return;
+  }
+
+  // ---- cartesian charts
+  const pts = marks.map(m => ({ m, x: chartVal(m.x), y: chartVal(m.y), x0: m.x0 != null ? chartVal(m.x0) : null, y0: m.y0 != null ? chartVal(m.y0) : null }));
+  // horizontal bars: categories on y, numbers on x
+  const horiz = pts.some(p => p.m.kind === 'bar' && p.y.cat != null && p.x.num != null);
+  const catAxis = horiz ? 'y' : 'x', valAxis = horiz ? 'x' : 'y';
+  const cats = [];
+  for (const p of pts) { const c = p[catAxis].cat; if (c != null && !cats.includes(c)) cats.push(c); }
+  const xIsCat = !horiz && cats.length > 0;
+  const yIsCat = horiz;
+
+  // stacking of bars that share a category
+  const stackPos = new Map(), stackNeg = new Map();
+  for (const p of pts) {
+    if (p.m.kind !== 'bar' || p.m.stack === 'unstacked' || p[valAxis].num == null || p[valAxis + '0']) continue;
+    const key = p[catAxis].cat ?? p[catAxis].num;
+    const v = p[valAxis].num;
+    const store = v >= 0 ? stackPos : stackNeg;
+    const base = p.m.group != null ? 0 : (store.get(key) || 0);
+    p.base = base;
+    p.top = base + v;
+    if (p.m.group == null) store.set(key, base + v);
+  }
+
+  // value domain
+  let vals = [];
+  for (const p of pts) {
+    if (p.top != null) vals.push(p.top, p.base);
+    else {
+      if (p[valAxis].num != null) vals.push(p[valAxis].num);
+      if (p[valAxis + '0'] && p[valAxis + '0'].num != null) vals.push(p[valAxis + '0'].num);
+    }
+    if (p.m.kind === 'bar' || p.m.kind === 'area') vals.push(0);
+  }
+  const dom = opts[valAxis + 'Domain'];
+  let vmin = vals.length ? Math.min(...vals) : 0, vmax = vals.length ? Math.max(...vals) : 1;
+  if (dom) { vmin = chartVal(dom[0]).num ?? vmin; vmax = chartVal(dom[1]).num ?? vmax; }
+  const vt = dom ? { lo: vmin, hi: vmax, ticks: niceTicks(vmin, vmax).ticks.filter(t => t >= vmin && t <= vmax) } : niceTicks(vmin, vmax);
+
+  // numeric/date domain of the other axis (line/point charts over numbers or dates)
+  const numCat = !xIsCat && !yIsCat;
+  let cmin = 0, cmax = 1, cdate = false, ct = null;
+  if (numCat) {
+    const xs = [];
+    for (const p of pts) { if (p.x.num != null) { xs.push(p.x.num); cdate = cdate || !!p.x.date; } if (p.x0 && p.x0.num != null) xs.push(p.x0.num); }
+    cmin = xs.length ? Math.min(...xs) : 0; cmax = xs.length ? Math.max(...xs) : 1;
+    const xd = opts.xDomain;
+    if (xd) { cmin = chartVal(xd[0]).num ?? cmin; cmax = chartVal(xd[1]).num ?? cmax; }
+    if (cmin === cmax) { cmin -= 1; cmax += 1; }
+    ct = cdate ? { lo: cmin, hi: cmax, ticks: Array.from({ length: 5 }, (_, i) => cmin + (cmax - cmin) * i / 4) } : niceTicks(cmin, cmax);
+    if (!cdate && !xd) { cmin = ct.lo; cmax = ct.hi; }
+  }
+
+  // plot area: value labels on the trailing side like Swift Charts
+  const showX = opts.xAxis !== false, showY = opts.yAxis !== false;
+  const legendH = legend ? 22 * Math.ceil(seriesNames.length / 3) : 0;
+  const labelW = showY && !yIsCat ? Math.max(...vt.ticks.map(t => fmtTick(t).length)) * 6.5 + 8 : 0;
+  const catW = yIsCat ? Math.min(W * 0.35, Math.max(...cats.map(c => c.length)) * 6.5 + 8) : 0;
+  const L = catW + 2, R = W - labelW - (yIsCat ? 30 : 2), T = 6, B = H - (showX ? 22 : 6) - legendH - (opts.xLabel ? 16 : 0);
+  const pw = Math.max(10, R - L), ph = Math.max(10, B - T);
+
+  const vScale = v => (horiz ? L + ((v - vt.lo) / (vt.hi - vt.lo || 1)) * pw : B - ((v - vt.lo) / (vt.hi - vt.lo || 1)) * ph);
+  const band = cats.length ? (horiz ? ph : pw) / cats.length : 0;
+  const catPos = c => (horiz ? T : L) + band * (cats.indexOf(c) + 0.5);
+  const xNum = v => L + ((v - cmin) / (cmax - cmin || 1)) * pw;
+  const xOf = p => (xIsCat ? catPos(p.x.cat) : horiz ? vScale(p.x.num) : xNum(p.x.num));
+  const yOf = p => (yIsCat ? catPos(p.y.cat) : vScale(p.y.num));
+
+  const grid = svgEl('g', { style: { stroke: 'var(--separator, rgba(128,128,128,.3))' } }, svg);
+  const labels = svgEl('g', { style: { fill: 'var(--label2, #888)' } }, svg);
+  // value gridlines + labels
+  if (showY || horiz) {
+    for (const t of vt.ticks) {
+      if (horiz) {
+        const x = vScale(t);
+        svgEl('line', { x1: x, x2: x, y1: T, y2: B, 'stroke-dasharray': t === 0 ? '' : '2 3' }, grid);
+        if (showX) { const tx = svgEl('text', { x, y: B + 14, 'text-anchor': 'middle' }, labels); tx.textContent = fmtTick(t); }
+      } else {
+        const y = vScale(t);
+        svgEl('line', { x1: L, x2: R, y1: y, y2: y, 'stroke-dasharray': t === 0 ? '' : '2 3' }, grid);
+        const tx = svgEl('text', { x: R + 4, y: y + 4 }, labels); tx.textContent = fmtTick(t);
+      }
+    }
+  }
+  // category / numeric axis labels
+  if (xIsCat && showX) {
+    const every = Math.max(1, Math.ceil(cats.length / Math.max(1, Math.floor(pw / 34))));
+    cats.forEach((c, i) => { if (i % every) return; const tx = svgEl('text', { x: catPos(c), y: B + 14, 'text-anchor': 'middle' }, labels); tx.textContent = c; });
+  } else if (yIsCat) {
+    cats.forEach(c => { const tx = svgEl('text', { x: L - 6, y: catPos(c) + 4, 'text-anchor': 'end' }, labels); tx.textContent = c; });
+  } else if (numCat && showX && ct) {
+    for (const t of ct.ticks) { const x = xNum(t); if (x < L - 1 || x > R + 1) continue; const tx = svgEl('text', { x, y: B + 14, 'text-anchor': 'middle' }, labels); tx.textContent = fmtTick(t, cdate); }
+  }
+  if (opts.xLabel) { const tx = svgEl('text', { x: (L + R) / 2, y: B + 30, 'text-anchor': 'middle' }, labels); tx.textContent = opts.xLabel; }
+  if (opts.yLabel) { const tx = svgEl('text', { x: L, y: T + 10, style: { fontWeight: '600' } }, labels); tx.textContent = opts.yLabel; }
+
+  const plot = svgEl('g', {}, svg);
+  // bars (grouped by .position(by:) inside a category, otherwise stacked)
+  const bars = pts.filter(p => p.m.kind === 'bar' || p.m.kind === 'rect');
+  const groups = new Map();
+  for (const p of bars) if (p.m.group != null) { const k = p[catAxis].cat ?? p[catAxis].num; if (!groups.has(k)) groups.set(k, []); if (!groups.get(k).includes(p.m.group)) groups.get(k).push(p.m.group); }
+  for (const p of bars) {
+    const color = colorOf(p.m);
+    let bw = p.m.bw || (cats.length ? band * 0.6 : Math.max(4, pw / Math.max(8, bars.length) * 0.6));
+    let c = horiz ? yOf(p) : xOf(p);
+    if (p.m.group != null) {
+      const g = groups.get(p[catAxis].cat ?? p[catAxis].num) || [p.m.group];
+      bw = bw / g.length;
+      c = c - (bw * g.length) / 2 + bw * (g.indexOf(p.m.group) + 0.5);
+    }
+    const v0 = p.base != null ? p.base : p[valAxis + '0'] ? p[valAxis + '0'].num : 0;
+    const v1 = p.top != null ? p.top : p[valAxis].num;
+    if (v1 == null) continue;
+    const a = vScale(v0), b = vScale(v1);
+    const r = p.m.r || 0;
+    const attrs = horiz
+      ? { x: Math.min(a, b), y: c - bw / 2, width: Math.abs(b - a), height: bw }
+      : { x: c - bw / 2, y: Math.min(a, b), width: bw, height: Math.abs(b - a) };
+    svgEl('rect', { ...attrs, rx: r, style: { fill: color, opacity: p.m.opacity ?? 1 } }, plot);
+    if (p.m.note) {
+      const tx = svgEl('text', horiz ? { x: Math.max(a, b) + 4, y: c + 4 } : { x: c, y: Math.min(a, b) - 4, 'text-anchor': 'middle' }, plot);
+      tx.style.fill = 'var(--label, #000)'; tx.textContent = p.m.note;
+    }
+  }
+  // areas and lines per series
+  const bySeries = (kind) => {
+    const out = new Map();
+    for (const p of pts) if (p.m.kind === kind && p.y.num != null) { const k = p.m.line ?? p.m.series ?? ''; if (!out.has(k)) out.set(k, []); out.get(k).push(p); }
+    for (const arr of out.values()) arr.sort((a, b) => xOf(a) - xOf(b));
+    return out;
+  };
+  const linePath = (arr, smooth, step) => {
+    const P = arr.map(p => [xOf(p), yOf(p)]);
+    if (!P.length) return '';
+    let d = `M${P[0][0]} ${P[0][1]}`;
+    for (let i = 1; i < P.length; i++) {
+      if (step) d += `H${P[i][0]}V${P[i][1]}`;
+      else if (smooth) {
+        const p0 = P[i - 2] || P[i - 1], p1 = P[i - 1], p2 = P[i], p3 = P[i + 1] || P[i];
+        d += `C${p1[0] + (p2[0] - p0[0]) / 6} ${p1[1] + (p2[1] - p0[1]) / 6} ${p2[0] - (p3[0] - p1[0]) / 6} ${p2[1] - (p3[1] - p1[1]) / 6} ${p2[0]} ${p2[1]}`;
+      } else d += `L${P[i][0]} ${P[i][1]}`;
+    }
+    return d;
+  };
+  for (const arr of bySeries('area').values()) {
+    const smooth = arr[0].m.interp === 'smooth', step = arr[0].m.interp === 'step';
+    const top = linePath(arr, smooth, step);
+    const base = arr[0].y0 ? arr.slice().reverse().map(p => `L${xOf(p)} ${vScale(p.y0.num)}`).join('') : `L${xOf(arr[arr.length - 1])} ${vScale(Math.max(vt.lo, Math.min(0, vt.hi)))}L${xOf(arr[0])} ${vScale(Math.max(vt.lo, Math.min(0, vt.hi)))}`;
+    svgEl('path', { d: top + base + 'Z', style: { fill: colorOf(arr[0].m), opacity: arr[0].m.opacity ?? 0.35 } }, plot);
+  }
+  for (const arr of bySeries('line').values()) {
+    const m = arr[0].m;
+    svgEl('path', { d: linePath(arr, m.interp === 'smooth', m.interp === 'step'), 'stroke-dasharray': (m.dash || []).join(' '), style: { fill: 'none', stroke: colorOf(m), strokeWidth: (m.lw || 2) + 'px', strokeLinejoin: 'round', strokeLinecap: 'round', opacity: m.opacity ?? 1 } }, plot);
+    if (m.symbol) for (const p of arr) svgEl('circle', { cx: xOf(p), cy: yOf(p), r: 3.5, style: { fill: colorOf(p.m) } }, plot);
+  }
+  // points
+  for (const p of pts) {
+    if (p.m.kind !== 'point' || p.y.num == null && !yIsCat) continue;
+    const r = p.m.symbolSize ? Math.sqrt(p.m.symbolSize) / 2 : 4;
+    const x = xOf(p), y = yOf(p);
+    if (p.m.symbol === 'square') svgEl('rect', { x: x - r, y: y - r, width: 2 * r, height: 2 * r, style: { fill: colorOf(p.m) } }, plot);
+    else if (p.m.symbol === 'triangle') svgEl('path', { d: `M${x} ${y - r}L${x + r} ${y + r}L${x - r} ${y + r}Z`, style: { fill: colorOf(p.m) } }, plot);
+    else svgEl('circle', { cx: x, cy: y, r, style: { fill: colorOf(p.m), opacity: p.m.opacity ?? 1 } }, plot);
+    if (p.m.note) { const tx = svgEl('text', { x, y: y - r - 4, 'text-anchor': 'middle' }, plot); tx.style.fill = 'var(--label, #000)'; tx.textContent = p.m.note; }
+  }
+  // rules (thresholds, averages)
+  for (const p of pts) {
+    if (p.m.kind !== 'rule') continue;
+    const style = { stroke: colorOf(p.m), strokeWidth: (p.m.lw || 1.5) + 'px' };
+    const dash = (p.m.dash || []).join(' ');
+    if (p.m.dir === 'h' && p.y.num != null) {
+      const y = vScale(p.y.num);
+      const x1 = p.x0 && p.x0.num != null ? xNum(p.x0.num) : L, x2 = p.x0 && p.x.num != null ? xNum(p.x.num) : R;
+      svgEl('line', { x1, x2, y1: y, y2: y, 'stroke-dasharray': dash, style }, plot);
+      if (p.m.note) { const tx = svgEl('text', { x: x2 - 2, y: y - 4, 'text-anchor': 'end' }, plot); tx.style.fill = colorOf(p.m); tx.textContent = p.m.note; }
+    } else if (p.m.dir === 'v') {
+      const x = xIsCat ? catPos(p.x.cat) : xNum(p.x.num);
+      const y1 = p.y0 ? vScale(p.y0.num) : T, y2 = p.y0 ? vScale(p.y.num) : B;
+      svgEl('line', { x1: x, x2: x, y1, y2, 'stroke-dasharray': dash, style }, plot);
+    }
+  }
+  if (legend) drawLegend(svg, seriesNames, name => palette[name] || marks.find(m => m.series === name && m.color)?.color || CHART_PALETTE[seriesNames.indexOf(name) % CHART_PALETTE.length], W, H);
+}
+
+function drawLegend(svg, names, colorFor, W, H) {
+  const rows = Math.ceil(names.length / 3);
+  const g = svgEl('g', { style: { fill: 'var(--label2, #888)' } }, svg);
+  names.forEach((name, i) => {
+    const col = i % 3, row = Math.floor(i / 3);
+    const x = 4 + col * (W / 3), y = H - rows * 22 + row * 22 + 14;
+    svgEl('circle', { cx: x + 4, cy: y - 4, r: 4, style: { fill: colorFor(name, i) } }, g);
+    const t = svgEl('text', { x: x + 12, y }, g);
+    t.textContent = name;
+  });
+}
+
 function buildShape(n) {
+  if (n.p.shape === 'path') return buildPathShape(n);
   const el = div('shape');
   if (n.p.fill) el.style.background = n.p.fill === 'currentColor' ? 'var(--fg-shape, currentColor)' : n.p.fill;
   if (n.p.stroke) el.style.boxShadow = `inset 0 0 0 ${n.p.lw || 1}px ${n.p.stroke}`;
@@ -1085,6 +1452,19 @@ function applyMods(el, n, ctx) {
       case 'scheme': break;
       case 'sheet': overlays.push({ type: 'sheet', m, full: !!mod(n, 'fullScreen') }); break;
       case 'alert': overlays.push({ type: 'alert', m }); break;
+      case 'symbolEffect': {
+        // .symbolEffect(.bounce, value:) plays once when the value changes; isActive: keeps pulsing
+        const key = n.id;
+        const target = cur.querySelector('.sym') || cur;
+        if (m.active) target.classList.add('fx-pulse');
+        else if (m.v !== undefined) {
+          if (FX_SEEN.has(key) && FX_SEEN.get(key) !== m.v) {
+            target.classList.add('fx-' + (m.fx === 'pulse' || m.fx === 'breathe' || m.fx === 'variableColor' ? 'pulse1' : m.fx === 'wiggle' || m.fx === 'rotate' ? 'wiggle' : 'bounce'));
+          }
+          FX_SEEN.set(key, m.v);
+        }
+        break;
+      }
       default: break;
     }
   }

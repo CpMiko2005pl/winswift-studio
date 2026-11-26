@@ -47,6 +47,8 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
 | **Debugger LLDB** — breakpointy na marginesie, *Continue / Step Over / Into / Out* (F6/F7/F8), zmienne, stos wywołań, konsola `(lldb)` z `po` i `p`, podgląd wartości po najechaniu. | <img src="docs/screenshots/debugger.png" width="480" alt="Debugger"> |
 | <img src="docs/screenshots/library.png" width="480" alt="Library"> | **Jak w Xcode** — Canvas z `#Preview`, podpowiedzi i błędy na żywo (SourceKit-LSP), Quick Help, Rename, Code Actions, Open Quickly, Find &amp; Replace w projekcie, Library (Views, Modifiers, Snippets, SF Symbols, Colors, Images), Edit Scheme, nawigatory, motyw jasny i ciemny, własne skróty klawiszowe. |
 
+**Nowość w 1.5:** wykresy **Swift Charts** (`BarMark`, `LineMark`, `PointMark`, `AreaMark`, `RuleMark`, `SectorMark`), własne kształty (`Shape`, `Path`, `.trim` — pierścienie postępu), `AsyncImage` i `URLSession` (pobieranie danych z internetu), `@Bindable`, `NavigationSplitView` z zaznaczaniem w `List`, `ViewThatFits`, `TimelineView`, `.symbolEffect`.
+
 Działają też **programy konsolowe** i **Swift Package** (`swift build`).
 
 ## Ograniczenia — uczciwie

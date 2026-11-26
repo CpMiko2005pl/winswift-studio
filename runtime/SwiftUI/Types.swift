@@ -381,47 +381,105 @@ public struct DynamicTypeSize: Hashable, Sendable {
 
 // MARK: - Shapes
 
+/// Built-in shapes are drawn natively by the simulator (by name); custom shapes (`path(in:)`) are sent as SVG
+/// path data computed in a 100×100 box and scaled to the frame they get.
 public protocol Shape: View {
+    func path(in rect: CGRect) -> Path
     var _shapeName: String { get }
     var _shapeArgs: [String: _J] { get }
 }
 
 extension Shape {
-    public var _shapeArgs: [String: _J] { [:] }
-    public func fill<S: ShapeStyle>(_ style: S) -> _ShapeView { _ShapeView(name: _shapeName, args: _shapeArgs, fill: style._css, stroke: nil, lineWidth: 0) }
+    public var _shapeName: String { "path" }
+    public var _shapeArgs: [String: _J] { _pathArgs(path(in: _unitRect), aspect: "none") }
+    public func fill<S: ShapeStyle>(_ style: S, style fillStyle: FillStyle = FillStyle()) -> _ShapeView { _ShapeView(name: _shapeName, args: _shapeArgs, fill: style._css, stroke: nil, lineWidth: 0) }
     public func fill() -> _ShapeView { _ShapeView(name: _shapeName, args: _shapeArgs, fill: .s("currentColor"), stroke: nil, lineWidth: 0) }
     public func stroke<S: ShapeStyle>(_ style: S, lineWidth: CGFloat = 1) -> _ShapeView { _ShapeView(name: _shapeName, args: _shapeArgs, fill: nil, stroke: style._css, lineWidth: Double(lineWidth)) }
-    public func stroke<S: ShapeStyle>(_ style: S, style strokeStyle: StrokeStyle) -> _ShapeView { _ShapeView(name: _shapeName, args: _shapeArgs, fill: nil, stroke: style._css, lineWidth: Double(strokeStyle.lineWidth)) }
+    public func stroke<S: ShapeStyle>(_ style: S, style strokeStyle: StrokeStyle) -> _ShapeView { _ShapeView(name: _shapeName, args: _shapeArgs, fill: nil, stroke: style._css, lineWidth: Double(strokeStyle.lineWidth), strokeStyle: strokeStyle) }
+    public func stroke(style strokeStyle: StrokeStyle) -> _ShapeView { _ShapeView(name: _shapeName, args: _shapeArgs, fill: nil, stroke: .s("currentColor"), lineWidth: Double(strokeStyle.lineWidth), strokeStyle: strokeStyle) }
     public func strokeBorder<S: ShapeStyle>(_ style: S, lineWidth: CGFloat = 1) -> _ShapeView { stroke(style, lineWidth: lineWidth) }
+    public func strokeBorder<S: ShapeStyle>(_ style: S, style strokeStyle: StrokeStyle) -> _ShapeView { stroke(style, style: strokeStyle) }
     public func stroke(lineWidth: CGFloat = 1) -> _ShapeView { _ShapeView(name: _shapeName, args: _shapeArgs, fill: nil, stroke: .s("currentColor"), lineWidth: Double(lineWidth)) }
-    public func trim(from: CGFloat = 0, to: CGFloat = 1) -> Self { self }
+    /// `Circle().trim(from: 0, to: progress)` — progress rings and partial outlines.
+    public func trim(from: CGFloat = 0, to: CGFloat = 1) -> _TrimmedShape<Self> { _TrimmedShape(base: self, from: Double(from), to: Double(to)) }
+    public func inset(by amount: CGFloat) -> Self { self }
+    public func offset(x: CGFloat = 0, y: CGFloat = 0) -> Self { self }
+    public func rotation(_ angle: Angle, anchor: UnitPoint = .center) -> Self { self }
+    public func scale(_ s: CGFloat, anchor: UnitPoint = .center) -> Self { self }
+    /// Custom shapes render through `body` like in SwiftUI.
+    public var body: _ShapeView { fill() }
 }
+
+let _unitRect = CGRect(x: 0, y: 0, width: 100, height: 100)
+
+func _pathArgs(_ p: Path, aspect: String) -> [String: _J] {
+    ["d": .s(p._svg), "vb": .s("0 0 100 100"), "ar": .s(aspect)]
+}
+
+public struct FillStyle: Sendable {
+    public var isEOFilled: Bool
+    public var isAntialiased: Bool
+    public init(eoFill: Bool = false, antialiased: Bool = true) { isEOFilled = eoFill; isAntialiased = antialiased }
+}
+
+public enum CGLineCap: Int32, Sendable { case butt, round, square }
+public enum CGLineJoin: Int32, Sendable { case miter, round, bevel }
 
 public struct StrokeStyle: Sendable {
     public var lineWidth: CGFloat
-    public init(lineWidth: CGFloat = 1, lineCap: Int = 0, lineJoin: Int = 0, dash: [CGFloat] = []) { self.lineWidth = lineWidth }
+    public var lineCap: CGLineCap
+    public var lineJoin: CGLineJoin
+    public var miterLimit: CGFloat
+    public var dash: [CGFloat]
+    public var dashPhase: CGFloat
+    public init(lineWidth: CGFloat = 1, lineCap: CGLineCap = .butt, lineJoin: CGLineJoin = .miter, miterLimit: CGFloat = 10, dash: [CGFloat] = [], dashPhase: CGFloat = 0) {
+        self.lineWidth = lineWidth; self.lineCap = lineCap; self.lineJoin = lineJoin; self.miterLimit = miterLimit; self.dash = dash; self.dashPhase = dashPhase
+    }
 }
 
 nonisolated public struct _ShapeView: View, _PrimitiveView {
     let name: String, args: [String: _J], fill: _J?, stroke: _J?, lineWidth: Double
+    var strokeStyle: StrokeStyle? = nil
     public func _render(_ ctx: _Ctx) -> [_Node] {
         var p = args
         p["shape"] = .s(name)
         if let fill { p["fill"] = fill }
         if let stroke { p["stroke"] = stroke; p["lw"] = .n(lineWidth) }
+        if let s = strokeStyle {
+            if s.lineCap != .butt { p["cap"] = .s(s.lineCap == .round ? "round" : "square") }
+            if s.lineJoin != .miter { p["join"] = .s(s.lineJoin == .round ? "round" : "bevel") }
+            if !s.dash.isEmpty { p["dash"] = .a(s.dash.map { .num($0) }) }
+        }
         return [_Node("shape", ctx.path, p)]
+    }
+}
+
+/// A shape cut to a fraction of its outline (drawn as an SVG path with a dash pattern).
+public struct _TrimmedShape<Base: Shape>: Shape {
+    let base: Base, from: Double, to: Double
+    public func path(in rect: CGRect) -> Path { base.path(in: rect) }
+    public var _shapeName: String { "path" }
+    public var _shapeArgs: [String: _J] {
+        var a = _pathArgs(base.path(in: _unitRect), aspect: base._shapeName == "circle" ? "meet" : "none")
+        a["trim"] = .a([.n(Swift.max(0, Swift.min(1, from))), .n(Swift.max(0, Swift.min(1, to)))])
+        return a
     }
 }
 
 nonisolated public struct Rectangle: Shape, _PrimitiveView {
     public init() {}
+    public var body: Never { return fatalError("primitive view") }
+    public func path(in rect: CGRect) -> Path { Path(rect) }
     public var _shapeName: String { "rect" }
+    public var _shapeArgs: [String: _J] { [:] }
     public func _render(_ ctx: _Ctx) -> [_Node] { fill()._render(ctx) }
 }
 nonisolated public struct RoundedRectangle: Shape, _PrimitiveView {
     let r: CGFloat
     public init(cornerRadius: CGFloat, style: RoundedCornerStyle = .continuous) { r = cornerRadius }
     public init(cornerSize: CGSize, style: RoundedCornerStyle = .continuous) { r = cornerSize.width }
+    public var body: Never { return fatalError("primitive view") }
+    public func path(in rect: CGRect) -> Path { Path(roundedRect: rect, cornerRadius: r) }
     public var _shapeName: String { "rect" }
     public var _shapeArgs: [String: _J] { ["r": .num(r)] }
     public func _render(_ ctx: _Ctx) -> [_Node] { fill()._render(ctx) }
@@ -429,6 +487,8 @@ nonisolated public struct RoundedRectangle: Shape, _PrimitiveView {
 nonisolated public struct UnevenRoundedRectangle: Shape, _PrimitiveView {
     let r: CGFloat
     public init(topLeadingRadius: CGFloat = 0, bottomLeadingRadius: CGFloat = 0, bottomTrailingRadius: CGFloat = 0, topTrailingRadius: CGFloat = 0, style: RoundedCornerStyle = .continuous) { r = topLeadingRadius }
+    public var body: Never { return fatalError("primitive view") }
+    public func path(in rect: CGRect) -> Path { Path(roundedRect: rect, cornerRadius: r) }
     public var _shapeName: String { "rect" }
     public var _shapeArgs: [String: _J] { ["r": .num(r)] }
     public func _render(_ ctx: _Ctx) -> [_Node] { fill()._render(ctx) }
@@ -436,17 +496,29 @@ nonisolated public struct UnevenRoundedRectangle: Shape, _PrimitiveView {
 public enum RoundedCornerStyle: Sendable { case circular, continuous }
 nonisolated public struct Circle: Shape, _PrimitiveView {
     public init() {}
+    public var body: Never { return fatalError("primitive view") }
+    public func path(in rect: CGRect) -> Path {
+        let d = Swift.min(rect.width, rect.height)
+        return Path(ellipseIn: CGRect(x: rect.midX - d / 2, y: rect.midY - d / 2, width: d, height: d))
+    }
     public var _shapeName: String { "circle" }
+    public var _shapeArgs: [String: _J] { [:] }
     public func _render(_ ctx: _Ctx) -> [_Node] { fill()._render(ctx) }
 }
 nonisolated public struct Ellipse: Shape, _PrimitiveView {
     public init() {}
+    public var body: Never { return fatalError("primitive view") }
+    public func path(in rect: CGRect) -> Path { Path(ellipseIn: rect) }
     public var _shapeName: String { "ellipse" }
+    public var _shapeArgs: [String: _J] { [:] }
     public func _render(_ ctx: _Ctx) -> [_Node] { fill()._render(ctx) }
 }
 nonisolated public struct Capsule: Shape, _PrimitiveView {
     public init(style: RoundedCornerStyle = .continuous) {}
+    public var body: Never { return fatalError("primitive view") }
+    public func path(in rect: CGRect) -> Path { Path(roundedRect: rect, cornerRadius: Swift.min(rect.width, rect.height) / 2) }
     public var _shapeName: String { "capsule" }
+    public var _shapeArgs: [String: _J] { [:] }
     public func _render(_ ctx: _Ctx) -> [_Node] { fill()._render(ctx) }
 }
 

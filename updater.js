@@ -7,9 +7,11 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
-// update.json can sit on either site (uploading it to the shop's hosting by FTP works too); the newest version wins
+// update.json can sit on either site (uploading it to the shop's hosting by FTP works too); the newest version wins.
+// Every GitHub release also carries an update.json, so updates keep working while the website is down.
 const MANIFESTS = process.env.SWIFTCODE_UPDATE_URL ? [process.env.SWIFTCODE_UPDATE_URL]
-  : ['https://winswift.tacticalops.fun/update.json', 'https://xdecode.cyberscope.pl/update.json'];
+  : ['https://winswift.tacticalops.fun/update.json', 'https://xdecode.cyberscope.pl/update.json',
+    'https://github.com/CpMiko2005pl/winswift-studio/releases/latest/download/update.json'];
 const headers = () => ({ 'User-Agent': `WinSwift-Studio/${app.getVersion()}` });
 let downloading = null;   // AbortController of the running download
 

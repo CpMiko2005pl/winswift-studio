@@ -94,7 +94,7 @@ contextBridge.exposeInMainWorld('api', {
   closeConfirmed: () => invoke('app:close-confirmed'),
 
   on: (channel, fn) => {
-    const allowed = ['build:event', 'project:changed', 'app:before-close', 'app:command', 'lsp:notification', 'preview:event', 'debug:event', 'sim:modelChanged', 'license:changed', 'update:progress'];
+    const allowed = ['build:event', 'project:changed', 'app:before-close', 'app:command', 'app:openPath', 'lsp:notification', 'preview:event', 'debug:event', 'sim:modelChanged', 'license:changed', 'update:progress'];
     if (!allowed.includes(channel)) return;
     ipcRenderer.on(channel, (_e, payload) => fn(payload));
   },

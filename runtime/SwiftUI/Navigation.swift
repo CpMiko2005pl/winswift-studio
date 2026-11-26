@@ -122,11 +122,66 @@ func _screen(_ id: String, _ nodes: [_Node]) -> _Node {
 
 public typealias NavigationView = NavigationStack
 
+/// On iPhone a split view collapses into a stack: the sidebar is the root screen, and choosing a row of a
+/// `List(selection:)` (or a `NavigationLink(value:)` matching that selection) pushes the content/detail column.
 public struct NavigationSplitView<Sidebar: View, Detail: View>: View, _PrimitiveView {
     let sidebar: Sidebar
-    public init(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) { self.sidebar = sidebar() }
-    public init<C: View>(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder content: () -> C, @ViewBuilder detail: () -> Detail) { self.sidebar = sidebar() }
-    public func _render(_ ctx: _Ctx) -> [_Node] { NavigationStack { sidebar }._render(ctx) }
+    let middle: AnyView?
+    let detail: Detail
+    public init(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
+        self.sidebar = sidebar(); self.detail = detail(); middle = nil
+    }
+    public init<C: View>(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder content: () -> C, @ViewBuilder detail: () -> Detail) {
+        self.sidebar = sidebar(); self.detail = detail(); middle = AnyView(content())
+    }
+    public init(columnVisibility: Binding<NavigationSplitViewVisibility>, @ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
+        self.init(sidebar: sidebar, detail: detail)
+    }
+    public init<C: View>(columnVisibility: Binding<NavigationSplitViewVisibility>, @ViewBuilder sidebar: () -> Sidebar, @ViewBuilder content: () -> C, @ViewBuilder detail: () -> Detail) {
+        self.init(sidebar: sidebar, content: content, detail: detail)
+    }
+
+    public func _render(_ ctx: _Ctx) -> [_Node] {
+        // how many columns are pushed over the sidebar (1 = content or detail, 2 = content + detail)
+        let shown = ctx.graph.box(ctx.path + "#split") { [_SplitColumn]() }
+        let columns: [_SplitColumn] = middle != nil ? [.content, .detail] : [.detail]
+        let c = ctx.copy()
+        c.splitDetail = AnyView(detail)
+        c.splitMiddle = middle
+        c.splitShowDetail = {
+            // a selection in the sidebar shows the next column; in the content column, the detail
+            if shown.value.count < columns.count { shown.value.append(columns[shown.value.count]) }
+            _Runtime.setNeedsRender()
+        }
+        let path = Binding<[_SplitColumn]>(get: { shown.value }, set: { shown.value = $0; _Runtime.setNeedsRender() })
+        return NavigationStack(path: path) {
+            sidebar.navigationDestination(for: _SplitColumn.self) { col in _SplitColumnView(column: col) }
+        }._render(c)
+    }
+}
+
+public enum NavigationSplitViewVisibility: Hashable, Sendable {
+    case automatic, all, doubleColumn, detailOnly
+}
+
+public enum _SplitColumn: Hashable, Sendable { case content, detail }
+
+struct _SplitColumnView: View, _PrimitiveView {
+    let column: _SplitColumn
+    func _render(_ ctx: _Ctx) -> [_Node] {
+        let view = column == .content ? ctx.splitMiddle : ctx.splitDetail
+        let c = ctx.copy()
+        // only the content column keeps opening the detail column
+        if column == .detail { c.splitShowDetail = nil }
+        c.listSelect = nil
+        return (view ?? AnyView(EmptyView()))._render(c)
+    }
+}
+
+extension View {
+    public func navigationSplitViewColumnWidth(_ width: CGFloat) -> some View { self }
+    public func navigationSplitViewColumnWidth(min: CGFloat? = nil, ideal: CGFloat, max: CGFloat? = nil) -> some View { self }
+    public func navigationSplitViewStyle<S>(_ style: S) -> some View { self }
 }
 
 public struct NavigationLink<Label: View, Destination: View>: View, _PrimitiveView {
@@ -144,7 +199,12 @@ public struct NavigationLink<Label: View, Destination: View>: View, _PrimitiveVi
                 let v = AnyView(destination)
                 ctx.action(ctx.path) { nav.push(.view(v, title: "")) }
             } else if let value {
-                ctx.action(ctx.path) { nav.push(.value(value)) }
+                // inside a List(selection:) whose selection has this value's type, the link selects the row
+                if let select = ctx.listSelect, select(value, false) {
+                    ctx.action(ctx.path) { _ = select(value, true) }
+                } else {
+                    ctx.action(ctx.path) { nav.push(.value(value)) }
+                }
             }
         }
         var p: [String: _J] = [:]

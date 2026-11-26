@@ -422,3 +422,15 @@ html.canvas-mode #bezel { box-shadow: 0 0 0 2px #4b4b50 inset, 0 0 0 3px #111 in
 #device.m-home .home-btn { display: block; }
 .home-btn:active { background: #222; }
 #device.m-home::before { content: ""; position: absolute; left: 50%; top: 46px; width: 64px; height: 6px; margin-left: -32px; border-radius: 3px; background: #0b0b0c; z-index: 1; }
+/* Path views draw at their own coordinates (1.5) */
+.shape.pathabs { flex: 0 0 auto; align-self: flex-start; }
+.shape.pathshape svg path { transition: stroke-dashoffset .25s, stroke-dasharray .25s; }
+
+/* .symbolEffect (1.5) */
+@keyframes fx-bounce { 0% { transform: scale(1); } 35% { transform: scale(1.25) translateY(-2px); } 70% { transform: scale(.95); } 100% { transform: scale(1); } }
+@keyframes fx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes fx-wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+.fx-bounce { animation: fx-bounce .45s ease-out; display: inline-block; }
+.fx-pulse1 { animation: fx-pulse .8s ease-in-out; }
+.fx-pulse { animation: fx-pulse 1.2s ease-in-out infinite; }
+.fx-wiggle { animation: fx-wiggle .4s ease-in-out 2; display: inline-block; }

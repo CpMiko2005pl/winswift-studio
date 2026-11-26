@@ -2,7 +2,7 @@
 // Source rewriting and resource checks shared by the build (main.js) and SwiftCode's tests.
 
 // Apple-only spellings that have to change to build on Windows (line numbers are kept).
-const APPLE_IMPORTS = /^([ \t]*(?:@preconcurrency\s+|@_exported\s+)?import\s+)(UIKit|Combine|CoreLocation|CoreLocationUI|MapKit|AVFoundation|PhotosUI)\b/gm;
+const APPLE_IMPORTS = /^([ \t]*(?:@preconcurrency\s+|@_exported\s+)?import\s+)(UIKit|Combine|CoreLocation|CoreLocationUI|MapKit|AVFoundation|PhotosUI|Charts)\b/gm;
 
 // @objc / @objc(name) / @objcMembers: Swift on Windows has no Objective-C runtime and rejects them
 const OBJC_ATTR = /@objc(?:Members)?\b(?:[ \t]*\([^)\n]*\))?/g;
@@ -53,18 +53,67 @@ function stringEnd(src, start) {
   return Math.min(j + 1, src.length);
 }
 
+/**
+ * If a string literal or a comment starts at `i`, the index just after it; otherwise -1.
+ * Handles "…" (with \(interpolations("…"))), """…""", raw #"…"# strings, line comments and nested block comments.
+ */
+function literalEnd(src, i) {
+  const c = src[i];
+  if (c === '#') {
+    // raw string: #"…"#, ##"…"##, #"""…"""#
+    let h = 0;
+    while (src[i + h] === '#') h++;
+    if (src[i + h] !== '"') return -1;
+    const multi = src.startsWith('"""', i + h);
+    const close = (multi ? '"""' : '"') + '#'.repeat(h);
+    const e = src.indexOf(close, i + h + (multi ? 3 : 1));
+    return e < 0 ? src.length : e + close.length;
+  }
+  if (src.startsWith('"""', i)) {
+    let j = i + 3;
+    while (j < src.length) {
+      if (src[j] === '\\') { j += 2; continue; }
+      if (src.startsWith('"""', j)) return j + 3;
+      j++;
+    }
+    return src.length;
+  }
+  if (c === '"') return stringEnd(src, i);
+  if (c === '/' && src[i + 1] === '/') { const e = src.indexOf('\n', i); return e < 0 ? src.length : e; }
+  if (c === '/' && src[i + 1] === '*') {
+    // Swift block comments nest
+    let depth = 1, j = i + 2;
+    while (j < src.length && depth > 0) {
+      if (src[j] === '/' && src[j + 1] === '*') { depth++; j += 2; }
+      else if (src[j] === '*' && src[j + 1] === '/') { depth--; j += 2; }
+      else j++;
+    }
+    return j;
+  }
+  return -1;
+}
+
+/** Per character: 1 = code, 0 = inside a string literal or a comment. */
+function codeMask(src) {
+  const mask = new Uint8Array(src.length);
+  let i = 0;
+  while (i < src.length) {
+    const end = (src[i] === '"' || src[i] === '/' || src[i] === '#') ? literalEnd(src, i) : -1;
+    if (end > i) { i = end; continue; }
+    mask[i] = 1;
+    i++;
+  }
+  return mask;
+}
+
 /** Runs a regex replacement only on code — string literals ("…", """…""") and comments are left as they are. */
 function replaceInCode(src, re, fn) {
   let out = '', code = '', i = 0;
   const flush = () => { out += code.replace(re, fn); code = ''; };
   while (i < src.length) {
     const c = src[i];
-    let end = -1;
-    if (src.startsWith('"""', i)) { const e = src.indexOf('"""', i + 3); end = e < 0 ? src.length : e + 3; }
-    else if (c === '"') end = stringEnd(src, i);
-    else if (c === '/' && src[i + 1] === '/') { const e = src.indexOf('\n', i); end = e < 0 ? src.length : e; }
-    else if (c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); end = e < 0 ? src.length : e + 2; }
-    if (end < 0) { code += c; i++; continue; }
+    const end = (c === '"' || c === '/' || c === '#') ? literalEnd(src, i) : -1;
+    if (end <= i) { code += c; i++; continue; }
     flush();
     out += src.slice(i, end);
     i = end;
@@ -77,9 +126,8 @@ function matchingBrace(src, open) {
   let depth = 0;
   for (let i = open; i < src.length; i++) {
     const c = src[i];
-    if (c === '"') { i++; while (i < src.length && src[i] !== '"') { if (src[i] === '\\') i++; i++; } continue; }
-    if (c === '/' && src[i + 1] === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
-    if (c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? src.length : e + 1; continue; }
+    const end = (c === '"' || c === '/' || c === '#') ? literalEnd(src, i) : -1;
+    if (end > i) { i = end - 1; continue; }
     if (c === '{') depth++;
     else if (c === '}') { depth--; if (depth === 0) return i; }
   }
@@ -107,7 +155,6 @@ function parseStrings(text) {
       i++;
       let s = '';
       while (i < text.length && text[i] !== '"') {
-        if (text[i] === '\n' && false) break;
         if (text[i] === '\\') { i++; const c = text[i]; s += c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c; i++; continue; }
         s += text[i++];
       }
@@ -139,4 +186,4 @@ function parseStrings(text) {
 }
 
 
-module.exports = { rewriteForWindows, matchingBrace, replaceInCode, parseStrings };
+module.exports = { rewriteForWindows, matchingBrace, replaceInCode, parseStrings, codeMask, literalEnd };

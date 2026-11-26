@@ -876,17 +876,26 @@ extension Picker where Label == Text {
 
 // MARK: - ForEach
 
-public struct ForEach<Data: RandomAccessCollection, ID: Hashable, Content: View>: View, _PrimitiveView {
+/// Content is a View for view lists, or chart content inside `Chart { … }` (see Charts.swift).
+public struct ForEach<Data: RandomAccessCollection, ID: Hashable, Content> {
     let data: Data
     let idFor: (Data.Element) -> ID
     let content: (Data.Element) -> Content
     var onDeleteAction: ((IndexSet) -> Void)?
     var onMoveAction: ((IndexSet, Int) -> Void)?
 
-    public init(_ data: Data, id: KeyPath<Data.Element, ID>, @ViewBuilder content: @escaping (Data.Element) -> Content) {
-        self.data = data; self.idFor = { $0[keyPath: id] }; self.content = content
+    init(_data data: Data, idFor: @escaping (Data.Element) -> ID, content: @escaping (Data.Element) -> Content) {
+        self.data = data; self.idFor = idFor; self.content = content
     }
+}
 
+extension ForEach where Content: View {
+    public init(_ data: Data, id: KeyPath<Data.Element, ID>, @ViewBuilder content: @escaping (Data.Element) -> Content) {
+        self.init(_data: data, idFor: { $0[keyPath: id] }, content: content)
+    }
+}
+
+extension ForEach: View, _PrimitiveView where Content: View {
     public func onDelete(perform action: ((IndexSet) -> Void)?) -> ForEach { var f = self; f.onDeleteAction = action; return f }
     public func onMove(perform action: ((IndexSet, Int) -> Void)?) -> ForEach { var f = self; f.onMoveAction = action; return f }
 
@@ -904,20 +913,20 @@ public struct ForEach<Data: RandomAccessCollection, ID: Hashable, Content: View>
     }
 }
 
-extension ForEach where Data.Element: Identifiable, ID == Data.Element.ID {
+extension ForEach where Content: View, Data.Element: Identifiable, ID == Data.Element.ID {
     public init(_ data: Data, @ViewBuilder content: @escaping (Data.Element) -> Content) {
         self.init(data, id: \.id, content: content)
     }
 }
 
-extension ForEach where Data == Range<Int>, ID == Int {
+extension ForEach where Content: View, Data == Range<Int>, ID == Int {
     public init(_ data: Range<Int>, @ViewBuilder content: @escaping (Int) -> Content) {
         self.init(data, id: \.self, content: content)
     }
 }
 
 /// `ForEach($items) { $item in … }`
-extension ForEach {
+extension ForEach where Content: View {
     public init<C: MutableCollection & RandomAccessCollection>(_ data: Binding<C>, @ViewBuilder content: @escaping (Binding<C.Element>) -> Content)
     where C.Element: Identifiable, C.Index: Hashable, Data == [Binding<C.Element>], ID == C.Element.ID {
         let bindings: [Binding<C.Element>] = data.wrappedValue.indices.map { idx in
@@ -931,10 +940,31 @@ extension ForEach {
 
 public struct List<Content: View>: View, _PrimitiveView {
     let content: Content
+    var select: ((AnyHashable, Bool) -> Bool)? = nil
     public init(@ViewBuilder content: () -> Content) { self.content = content() }
-    public init<S: Hashable>(selection: Binding<S?>?, @ViewBuilder content: () -> Content) { self.content = content() }
+    public init<S: Hashable>(selection: Binding<S?>?, @ViewBuilder content: () -> Content) {
+        self.content = content()
+        if let selection {
+            select = { value, commit in
+                guard let v = value.base as? S else { return false }
+                if commit { selection.wrappedValue = v; _Runtime.setNeedsRender() }
+                return true
+            }
+        }
+    }
+    public init<S: Hashable>(selection: Binding<Set<S>>?, @ViewBuilder content: () -> Content) { self.content = content() }
     public func _render(_ ctx: _Ctx) -> [_Node] {
         let c = ctx.copy(); c.parentAxis = "list"
+        if let select {
+            let show = ctx.splitShowDetail
+            c.listSelect = { value, commit in
+                let ok = select(value, commit)
+                if ok && commit { show?() }
+                return ok
+            }
+        } else {
+            c.listSelect = nil
+        }
         var p: [String: _J] = ["style": .s(ctx.env.listStyle)]
         if _editModeBinding(ctx).wrappedValue.isEditing { p["editing"] = .b(true) }
         return [_Node("list", ctx.path, p, _resolve(content, c))]

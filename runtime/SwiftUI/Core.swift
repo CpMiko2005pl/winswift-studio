@@ -4,6 +4,11 @@
 
 @_exported import Foundation
 @_exported import Observation
+// URLSession, URLRequest, HTTPURLResponse live in FoundationNetworking outside Apple platforms; apps use them
+// with just `import Foundation` / `import SwiftUI`, so the runtime re-exports them.
+#if canImport(FoundationNetworking)
+@_exported import FoundationNetworking
+#endif
 #if canImport(CRT)
 import CRT
 #endif
@@ -167,21 +172,33 @@ public final class _Ctx {
     var nav: _NavContext?
     var dismissOnTap: (() -> Void)?
     var parentAxis: String = "v"
+    /// `List(selection:)`: (value, commit) → whether the value fits the selection (and, on commit, selects it)
+    var listSelect: ((AnyHashable, Bool) -> Bool)?
+    /// NavigationSplitView on iPhone: shows the detail column (pushes it)
+    var splitShowDetail: (() -> Void)?
+    /// NavigationSplitView: the current detail column
+    var splitDetail: AnyView?
+    var splitMiddle: AnyView?
 
     init(path: String, graph: _Graph, env: EnvironmentValues) {
         self.path = path; self.graph = graph; self.env = env
     }
 
+    func inherit(from o: _Ctx) {
+        nav = o.nav; dismissOnTap = o.dismissOnTap; parentAxis = o.parentAxis
+        listSelect = o.listSelect; splitShowDetail = o.splitShowDetail; splitDetail = o.splitDetail; splitMiddle = o.splitMiddle
+    }
+
     func child(_ component: String) -> _Ctx {
         let c = _Ctx(path: path + "/" + component, graph: graph, env: env)
-        c.nav = nav; c.dismissOnTap = dismissOnTap; c.parentAxis = parentAxis
+        c.inherit(from: self)
         return c
     }
 
     /// Same identity, separately modifiable environment.
     func copy() -> _Ctx {
         let c = _Ctx(path: path, graph: graph, env: env)
-        c.nav = nav; c.dismissOnTap = dismissOnTap; c.parentAxis = parentAxis
+        c.inherit(from: self)
         return c
     }
 

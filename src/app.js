@@ -1036,6 +1036,7 @@ async function refreshSourceControl() {
   const root = S.root, seq = ++gitRefresh;
   const host = $('#git-list');
   if (!root) { host.textContent = 'Open a project or clone a repository.'; return; }
+  if (!host.childElementCount) host.textContent = 'Checking Git status…';
   try {
     const changes = await api.git(root, 'status');
     if (seq !== gitRefresh || S.root !== root) return;
@@ -1052,7 +1053,12 @@ async function refreshSourceControl() {
       stage.onclick = () => gitAction('stage', file);
       row.append(diff, stage); host.appendChild(row);
     }
-  } catch (e) { if (S.root === root && seq === gitRefresh) host.textContent = e.message; }
+  } catch (e) {
+    if (S.root !== root || seq !== gitRefresh) return;
+    host.textContent = /not a git repository/i.test(e.message)
+      ? 'This project is not a Git repository. Use Clone… to get one, or run “git init” in the project folder.'
+      : e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  }
 }
 
 async function gitAction(action, value) {

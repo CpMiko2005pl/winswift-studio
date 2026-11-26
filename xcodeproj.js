@@ -200,6 +200,30 @@ function appSources(root) {
   return { target: str(t.dict, 'name'), files, dirs, excluded };
 }
 
+/**
+ * Swift files in the app's folders that the Xcode project doesn't know at all — typically added on Windows by an older
+ * WinSwift that didn't write project.pbxproj. Files the project references but leaves out of the target are not listed
+ * (that is a choice made in Xcode), neither are test folders or synchronized folders (Xcode sees those by itself).
+ */
+function unreferencedSources(root, allSwift) {
+  const pbx = projectFile(root);
+  if (!pbx) return [];
+  let p;
+  try { p = load(pbx); } catch { return []; }
+  const t = appTarget(p);
+  if (!t) return [];
+  const tree = resolveTree(p);
+  const synced = syncedDirs(p, tree);
+  const referenced = new Set([...tree.paths.values()].map(norm));
+  const src = appSources(root);
+  if (!src) return [];
+  const tops = new Set(src.files.map(f => path.relative(p.projectDir, f).split(path.sep)[0]).filter(s => s && s !== '..'));
+  return allSwift.filter(f => {
+    const rel = path.relative(p.projectDir, f), parts = rel.split(path.sep);
+    return tops.has(parts[0]) && !referenced.has(norm(f)) && !synced.some(d => inside(f, d)) && !parts.slice(0, -1).some(d => /Tests$/.test(d));
+  });
+}
+
 // ------------------------------------------------------------------ settings shared with Xcode
 
 const SETTING_KEYS = {
@@ -795,4 +819,4 @@ ${projectCfg(true)}${projectCfg(false)}${targetCfg(true)}${targetCfg(false)}/* E
   return proj;
 }
 
-module.exports = { parse, load, projectFile, projectFileFor, appSources, readSettings, writeSettings, addPath, removePath, renamePath, createProject, ensureBuildIgnore, writeGitignore, q };
+module.exports = { parse, load, projectFile, projectFileFor, appSources, unreferencedSources, readSettings, writeSettings, addPath, removePath, renamePath, createProject, ensureBuildIgnore, writeGitignore, q };

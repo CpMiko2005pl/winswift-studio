@@ -588,6 +588,35 @@ async function openProject(root, { file } = {}) {
   // SourceKit warms up in the background (first start of a session takes a while)
   lspStartProject(root);
   if (setting('canvas') && S.ios) toggleCanvas(true);
+  setTimeout(() => offerProjectUpgrade(root), 1500);
+}
+
+// A project an older WinSwift worked on: offer, once, what makes it work with Xcode and git like a project made on a Mac.
+async function offerProjectUpgrade(root) {
+  if (S.root !== root || licenseLocked()) return;
+  const key = 'winswift:upgrade-declined:' + norm(root);
+  try { if (localStorage.getItem(key)) return; } catch {}
+  let plan;
+  try { plan = await api.migrationCheck(root); } catch { return; }
+  if (!plan || S.root !== root) return;
+  const items = [];
+  if (plan.createXcode) items.push(L(`• utworzyć ${S.name}.xcodeproj i .gitignore — folder otworzy się też w Xcode na Macu`, `• create ${S.name}.xcodeproj and .gitignore — the folder will also open in Xcode on a Mac`));
+  if (plan.addFiles.length) items.push(L(`• dopisać do projektu Xcode ${plan.addFiles.length} plik(ów) Swift, których Xcode nie widzi: ${plan.addFiles.slice(0, 4).join(', ')}${plan.addFiles.length > 4 ? '…' : ''}`,
+    `• add ${plan.addFiles.length} Swift file(s) Xcode doesn't see to the Xcode project: ${plan.addFiles.slice(0, 4).join(', ')}${plan.addFiles.length > 4 ? '…' : ''}`));
+  if (plan.untrackBuild) items.push(L(`• usunąć z gita ${plan.untrackBuild} plik(ów) z kompilacji (.build) — zostaną na dysku, a .gitignore nie wpuści ich ponownie`,
+    `• remove ${plan.untrackBuild} build output file(s) (.build) from git — they stay on disk and .gitignore keeps them out`));
+  const r = await api.confirm(L('Dostosować projekt do Xcode i gita?', 'Make this project Xcode- and git-friendly?'),
+    L('Ten projekt był zrobiony lub edytowany starszą wersją WinSwift Studio. Mogę:\n', 'This project was made or edited with an older WinSwift Studio. I can:\n') + items.join('\n')
+    + L('\n\nZmiany zobaczysz w nawigatorze Git (Ctrl+6) — potem commit i push.', '\n\nYou will see the changes in the Git navigator (Ctrl+6) — then commit and push.'),
+    [L('Napraw', 'Fix'), L('Nie teraz', 'Not Now'), L('Nie pytaj więcej', 'Don’t Ask Again')]);
+  if (r === 2) { try { localStorage.setItem(key, '1'); } catch {} return; }
+  if (r !== 0 || S.root !== root) return;
+  try {
+    const done = await api.migrate(root, plan);
+    toast(L(`Gotowe: ${done.length} zmian(y). Zrób commit i push, żeby kolega z Xcode je dostał.`, `Done: ${done.length} change(s). Commit and push so your Xcode teammate gets them.`), 7000);
+    await loadTree(); renderTree();
+    if (S.nav === 'source') refreshSourceControl();
+  } catch (e) { toast(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 7000); }
 }
 
 function closeProject(silent) {

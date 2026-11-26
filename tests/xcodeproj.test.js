@@ -320,6 +320,13 @@ test('classic project: tests target excluded, add / rename / remove like Xcode',
   assert.equal(s.displayName, 'Demo PL');
   assert.equal(s.deploymentTarget, '17.0', 'falls back to the project-level setting');
   assert.ok(fs.readdirSync(path.join(root, '.build', 'swiftcode', 'xcodeproj-backup')).length === 1, 'original kept once');
+  // a file an older WinSwift added without touching project.pbxproj; tests are never offered
+  const old = path.join(root, 'Demo', 'Old.swift'), t2 = path.join(root, 'DemoTests', 'More.swift');
+  fs.writeFileSync(old, '// x\n'); fs.writeFileSync(t2, '// x\n');
+  const all = [old, t2, path.join(root, 'Demo', 'ContentView.swift'), path.join(root, 'DemoTests', 'DemoTests.swift')];
+  assert.deepEqual(x.unreferencedSources(root, all), [old]);
+  x.addPath(old);
+  assert.deepEqual(x.unreferencedSources(root, all), []);
 });
 
 test('CRLF checkouts stay CRLF', () => {

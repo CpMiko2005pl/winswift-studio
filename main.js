@@ -274,9 +274,23 @@ async function projectSwiftFiles(root) {
     const files = new Set(x.files.map(norm)), excluded = new Set(x.excluded.map(norm));
     const inDir = f => x.dirs.some(d => norm(f).startsWith(norm(d) + '\\'));
     const picked = all.filter(f => (files.has(norm(f)) || inDir(f)) && !excluded.has(norm(f)));
-    if (picked.length) return picked;
+    // files an older WinSwift added without telling the Xcode project still belong to the app
+    let extra = [];
+    try { extra = xcode.unreferencedSources(root, all); } catch {}
+    if (picked.length) return [...picked, ...extra.filter(f => !picked.includes(f))];
   }
   return all.filter(f => !path.relative(root, f).split(path.sep).slice(0, -1).some(d => /Tests$/.test(d)));
+}
+
+/** git in the project folder; null when git is missing or the folder isn't a repository. */
+function gitQuiet(root, args) {
+  const local = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'MinGit', 'cmd', 'git.exe');
+  return new Promise(resolve => {
+    try {
+      execFile(fs.existsSync(local) ? local : 'git', ['--no-pager', ...args], { cwd: root, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+        (err, stdout) => resolve(err ? null : String(stdout || '')));
+    } catch { resolve(null); }
+  });
 }
 
 /** Runs a project-file update after a file operation; a problem there must never fail the operation itself. */
@@ -2289,6 +2303,40 @@ function registerIpc() {
   ipcMain.handle('fs:trash', async (_e, p) => {
     await shell.trashItem(p);
     syncXcode('delete', () => xcode.removePath(p));
+  });
+  // what an older WinSwift left behind in this project: no .xcodeproj, files Xcode doesn't know, build output in git
+  ipcMain.handle('project:migrationCheck', async (_e, root) => {
+    if (!root || fs.existsSync(path.join(root, 'Package.swift'))) return null;
+    const out = { createXcode: false, addFiles: [], untrackBuild: 0 };
+    const name = path.basename(root);
+    if (!xcode.projectFile(root) && fs.existsSync(path.join(root, name)) && fs.statSync(path.join(root, name)).isDirectory()) {
+      const s = readProjectSettings(root);
+      out.createXcode = s.platform === 'ios' || await isSwiftUIProject(root);
+    }
+    if (xcode.projectFile(root)) {
+      const all = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
+      try { out.addFiles = xcode.unreferencedSources(root, all).map(f => path.relative(root, f)); } catch {}
+    }
+    const tracked = await gitQuiet(root, ['ls-files', '--', '.build']);
+    out.untrackBuild = tracked ? tracked.split(/\r?\n/).filter(Boolean).length : 0;
+    return out.createXcode || out.addFiles.length || out.untrackBuild ? out : null;
+  });
+  ipcMain.handle('project:migrate', async (_e, root, plan) => {
+    const done = [];
+    if (plan.createXcode && !xcode.projectFile(root)) {
+      const s = readProjectSettings(root);
+      if (xcode.createProject(root, path.basename(root), { ...s, info: s.info || {} })) done.push('xcodeproj');
+    }
+    for (const rel of plan.addFiles || []) {
+      try { if (xcode.addPath(path.join(root, rel)) === 'added') done.push(rel); } catch (e) { console.error('[xcode] add', rel, e.message); }
+    }
+    if (plan.untrackBuild) {
+      xcode.writeGitignore(root);
+      xcode.ensureBuildIgnore(root);
+      // out of the repository, still on disk; the user commits the removal with the rest
+      if (await gitQuiet(root, ['rm', '-r', '-q', '--cached', '--', '.build']) !== null) done.push('.build');
+    }
+    return done;
   });
   // an older WinSwift project (sources in <root>/<name>/) gets the Xcode project it was missing
   ipcMain.handle('project:createXcode', async (_e, root) => {

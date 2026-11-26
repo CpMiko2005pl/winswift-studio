@@ -47,6 +47,12 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
 | **Debugger LLDB** — breakpointy na marginesie, *Continue / Step Over / Into / Out* (F6/F7/F8), zmienne, stos wywołań, konsola `(lldb)` z `po` i `p`, podgląd wartości po najechaniu. | <img src="docs/screenshots/debugger.png" width="480" alt="Debugger"> |
 | <img src="docs/screenshots/library.png" width="480" alt="Library"> | **Jak w Xcode** — Canvas z `#Preview`, podpowiedzi i błędy na żywo (SourceKit-LSP), Quick Help, Rename, Code Actions, Open Quickly, Find &amp; Replace w projekcie, Library (Views, Modifiers, Snippets, SF Symbols, Colors, Images), Edit Scheme, nawigatory, motyw jasny i ciemny, własne skróty klawiszowe. |
 
+### Nowości w 1.6.1 — projekt jak z Xcode (praca w zespole przez git)
+
+- Nowy projekt iOS ma prawdziwy **`Nazwa.xcodeproj`** (format Xcode 16, folder synchronizowany) — ten sam folder z gita otwiera się w Xcode na Macu i w WinSwift Studio na Windows. Do tego `.gitignore`, a pliki z kompilacji (`.build/`) nigdy nie trafiają do repozytorium.
+- Projekt z Maca: WinSwift buduje tylko target aplikacji (foldery testów `…Tests` / `…UITests` są pomijane), a **nowy plik, zmiana nazwy i usunięcie** są zapisywane w `project.pbxproj` tak, jak zrobiłby to Xcode (małe, czytelne zmiany w git diff). Bundle ID, wersja, nazwa i opisy uprawnień są wspólne dla obu programów.
+- Starszy projekt z WinSwift: *File ▸ Create Xcode Project (.xcodeproj)…*
+
 ### Nowości w 1.6.0
 
 - **Edytor.** Lista Issues, podkreślenia Monaco i czerwone banery uwzględniają wersję dokumentu. Edycja i wczytanie zmienionego pliku z dysku usuwają stare wyniki. Diagnostyki kompilatora i SourceKit są łączone.

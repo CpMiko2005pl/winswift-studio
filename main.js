@@ -12,8 +12,11 @@ const buildContext = new AsyncLocalStorage();
 const { rewriteForWindows, rewriteModels, parseStrings, codeMask, stripPreviews } = require('./buildtools');
 const license = require('./activation.js');   // not './license' — on Windows that finds the LICENSE file
 const updater = require('./updater');
+const xcode = require('./xcodeproj');
 
-const IGNORED_DIRS = new Set(['.build', '.git', '.swiftpm', 'node_modules', '.vs', '.vscode', '.idea']);
+const IGNORED_DIRS = new Set(['.build', '.git', '.swiftpm', 'node_modules', '.vs', '.vscode', '.idea', 'DerivedData', 'xcuserdata']);
+// Xcode's own project files: hidden from the navigator like Xcode does, and never searched for sources
+const ignoredEntry = name => name.startsWith('.') || IGNORED_DIRS.has(name) || /\.(xcodeproj|xcworkspace)$/i.test(name);
 
 // the app was renamed (SwiftCode → WinSwift Studio): keep settings, recent projects and the built runtime where they were
 app.setName('WinSwift Studio');
@@ -233,7 +236,7 @@ async function readTree(dir, depth = 0) {
   let entries = [];
   try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return node; }
   for (const e of entries) {
-    if (e.name.startsWith('.') || IGNORED_DIRS.has(e.name)) continue;
+    if (ignoredEntry(e.name)) continue;
     const p = path.join(dir, e.name);
     if (e.isDirectory()) node.children.push(await readTree(p, depth + 1));
     else if (e.isFile()) node.children.push({ name: e.name, path: p, type: 'file' });
@@ -248,7 +251,7 @@ async function collectFiles(root, filter) {
     let entries = [];
     try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
-      if (e.name.startsWith('.') || IGNORED_DIRS.has(e.name)) continue;
+      if (ignoredEntry(e.name)) continue;
       const p = path.join(dir, e.name);
       if (e.isDirectory()) await walk(p);
       else if (e.isFile() && filter(p)) out.push(p);
@@ -256,6 +259,29 @@ async function collectFiles(root, filter) {
   }
   await walk(root);
   return out;
+}
+
+/**
+ * The Swift files that make up the app — what Xcode would compile. With an .xcodeproj: the app target's Sources phase
+ * and synchronized folders (so a test target or a file excluded from the target is left out, like in Xcode). Without
+ * one: every Swift file except test bundles (…Tests / …UITests folders).
+ */
+async function projectSwiftFiles(root) {
+  const all = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
+  let x = null;
+  try { x = xcode.appSources(root); } catch {}
+  if (x) {
+    const files = new Set(x.files.map(norm)), excluded = new Set(x.excluded.map(norm));
+    const inDir = f => x.dirs.some(d => norm(f).startsWith(norm(d) + '\\'));
+    const picked = all.filter(f => (files.has(norm(f)) || inDir(f)) && !excluded.has(norm(f)));
+    if (picked.length) return picked;
+  }
+  return all.filter(f => !path.relative(root, f).split(path.sep).slice(0, -1).some(d => /Tests$/.test(d)));
+}
+
+/** Runs a project-file update after a file operation; a problem there must never fail the operation itself. */
+function syncXcode(what, fn) {
+  try { const r = fn(); if (process.env.SWIFTCODE_DEBUG) console.log('[xcode]', what, r); } catch (e) { console.error('[xcode]', what, e.message); }
 }
 
 const TEXT_EXT = /\.(swift|md|txt|json|ya?ml|toml|plist|xml|html|css|js|ts|c|h|cpp|hpp|m|mm|py|sh|bat|ps1|cfg|ini|gitignore|resolved)$/i;
@@ -637,11 +663,14 @@ struct ContentView: View {
   await fsp.writeFile(path.join(assets, 'AppIcon.appiconset', 'Contents.json'), JSON.stringify({ images: [{ idiom: 'universal', platform: 'ios', size: '1024x1024' }], ...info }, null, 2));
   await fsp.mkdir(path.join(group, 'Preview Content', 'Preview Assets.xcassets'), { recursive: true });
   await fsp.writeFile(path.join(group, 'Preview Content', 'Preview Assets.xcassets', 'Contents.json'), JSON.stringify(info, null, 2));
-  await fsp.writeFile(path.join(root, '.swiftcode.json'), JSON.stringify({
+  const settings = {
     name, organization: org || '', bundleId: `${org || 'com.example'}.${name.replace(/[^A-Za-z0-9.-]/g, '-')}`, platform: 'ios',
     displayName: name, version: '1.0', build: '1', deploymentTarget: '18.0',
     developmentRegion: 'en', knownRegions: ['en', 'Base'], info: {}, scheme: { appLanguage: 'system', appRegion: 'system' },
-  }, null, 2));
+  };
+  await fsp.writeFile(path.join(root, '.swiftcode.json'), JSON.stringify(settings, null, 2));
+  // the same folder opens in Xcode: <name>.xcodeproj (synchronized folder) + .gitignore for build output
+  syncXcode('create', () => xcode.createProject(root, name, settings));
   return { root, open: path.join(group, 'ContentView.swift') };
 }
 
@@ -808,7 +837,7 @@ async function ensureSwiftUIRuntime(swiftVersion, { silent = false } = {}) {
 const SWIFTUI_IMPORT = /^\s*(?:@preconcurrency\s+|@_exported\s+)?import\s+(?:SwiftUI|UIKit|Combine|CoreLocation|CoreLocationUI|MapKit|AVFoundation|PhotosUI|SwiftData|Charts)\b/m;
 
 async function isSwiftUIProject(root) {
-  const files = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
+  const files = await projectSwiftFiles(root);
   for (const f of files) {
     try { if (SWIFTUI_IMPORT.test(await fsp.readFile(f, 'utf8'))) return true; } catch {}
   }
@@ -1085,13 +1114,21 @@ function fileTemplate(name, projectName, kind) {
   }
 }
 
+/** WinSwift's settings (.swiftcode.json) under what the Xcode project says: the .xcodeproj is what both teammates share. */
 function readProjectSettings(root) {
-  try { return JSON.parse(fs.readFileSync(path.join(root, '.swiftcode.json'), 'utf8')); } catch { return {}; }
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(path.join(root, '.swiftcode.json'), 'utf8')); } catch {}
+  let x = null;
+  try { x = xcode.readSettings(root); } catch {}
+  if (x) { const { info, ...rest } = x; s = { ...s, ...rest, info: { ...(s.info || {}), ...info } }; }
+  return s;
 }
 function writeProjectSettings(root, patch) {
-  const s = { ...readProjectSettings(root), ...patch };
+  // eslint-disable-next-line no-unused-vars
+  const { xcodeProject, xcodeTarget, ...s } = { ...readProjectSettings(root), ...patch };
   fs.writeFileSync(path.join(root, '.swiftcode.json'), JSON.stringify(s, null, 2));
-  return s;
+  syncXcode('settings', () => xcode.writeSettings(root, patch));
+  return readProjectSettings(root);
 }
 
 /** Info.plist keys: a real Info.plist in the project plus what the project editor stored. */
@@ -1110,7 +1147,8 @@ function projectInfo(root) {
 }
 
 async function buildFolderProject(root, swiftVersion, preview) {
-  const files = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
+  xcode.ensureBuildIgnore(root);
+  const files = await projectSwiftFiles(root);
   if (!files.length) {
     ev('diag', { file: root, line: 0, col: 0, severity: 'error', message: 'No Swift source files in project.' });
     return { ok: false };
@@ -1855,7 +1893,7 @@ async function canvasStart({ root, file, index = 0, scheme, overrides }, seq) {
   const tc = await toolchainInfo();
   if (!tc.found) { canvasEvent({ type: 'error', seq, errors: [{ message: 'Swift toolchain not found' }] }); return; }
   if (seq !== canvasSeq) return;
-  const files = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
+  const files = await projectSwiftFiles(root);
   const t0 = Date.now();
   const res = await buildSwiftUIProject(root, files, tc.version, { file, index }, { quiet: true, overrides, cancelled: () => canvasSeq !== seq, onCompiler: p => { canvasCompiler = p; } });
   canvasCompiler = null;
@@ -1915,7 +1953,7 @@ let lsp = null;           // { proc, root, buf, pending, nextId, files }
 /** Describe both the file list and the source features that change the compiler invocation. */
 async function compilationInputs(root) {
   if (fs.existsSync(path.join(root, 'Package.swift'))) return null;
-  const files = (await collectFiles(root, p => p.toLowerCase().endsWith('.swift'))).sort();
+  const files = (await projectSwiftFiles(root)).sort();
   const sources = await Promise.all(files.map(f => fsp.readFile(f, 'utf8')));
   const ui = sources.some(s => SWIFTUI_IMPORT.test(s));
   const hasMainFile = files.some((f, i) => path.basename(f).toLowerCase() === 'main.swift' && !/^\s*@main\b/m.test(sources[i]));
@@ -1931,6 +1969,7 @@ async function writeCompileDatabase(root, inputs) {
   const { files, ui, library, models, key } = inputs;
   const dir = path.join(root, '.build', 'swiftcode');
   await fsp.mkdir(dir, { recursive: true });
+  xcode.ensureBuildIgnore(root);
   const args = [findOnPath('swiftc.exe') || 'swiftc', '-module-name', moduleName(path.basename(root)), ...swiftFlags()];
   if (ui) {
     const tc = await toolchainInfo();
@@ -2205,6 +2244,7 @@ function registerIpc() {
       if (norm(f) === norm(to)) continue;
       await fsp.cp(f, to, { recursive: true, force: false, errorOnExist: false });
       out.push(to);
+      syncXcode('import', () => xcode.addPath(to));
     }
     return out;
   });
@@ -2228,22 +2268,39 @@ function registerIpc() {
   ipcMain.handle('fs:newFile', async (_e, dir, name, projectName, kind) => {
     const p = path.join(dir, name);
     if (fs.existsSync(p)) throw new Error(`"${name}" already exists.`);
-    if (kind === 'assets') { await newAssetCatalog(p); return p; }
-    await fsp.writeFile(p, fileTemplate(name, projectName, kind));
+    if (kind === 'assets') await newAssetCatalog(p);
+    else await fsp.writeFile(p, fileTemplate(name, projectName, kind));
+    syncXcode('new file', () => xcode.addPath(p));
     return p;
   });
   ipcMain.handle('fs:newFolder', async (_e, dir, name) => {
     const p = path.join(dir, name);
     await fsp.mkdir(p, { recursive: true });
+    syncXcode('new group', () => xcode.addPath(p));
     return p;
   });
   ipcMain.handle('fs:rename', async (_e, from, toName) => {
     const to = path.join(path.dirname(from), toName);
     if (fs.existsSync(to)) throw new Error(`"${toName}" already exists.`);
     await fsp.rename(from, to);
+    syncXcode('rename', () => xcode.renamePath(from, to));
     return to;
   });
-  ipcMain.handle('fs:trash', (_e, p) => shell.trashItem(p));
+  ipcMain.handle('fs:trash', async (_e, p) => {
+    await shell.trashItem(p);
+    syncXcode('delete', () => xcode.removePath(p));
+  });
+  // an older WinSwift project (sources in <root>/<name>/) gets the Xcode project it was missing
+  ipcMain.handle('project:createXcode', async (_e, root) => {
+    if (xcode.projectFile(root)) throw new Error('This project already has an Xcode project.');
+    const name = path.basename(root);
+    if (!fs.existsSync(path.join(root, name)) || !fs.statSync(path.join(root, name)).isDirectory()) {
+      throw new Error(`The sources must be in the folder "${name}" inside the project folder, like in a project made by Xcode.`);
+    }
+    const s = readProjectSettings(root);
+    const proj = xcode.createProject(root, name, { ...s, info: s.info || {} });
+    return proj;
+  });
   ipcMain.handle('fs:reveal', (_e, p) => shell.showItemInFolder(p));
   ipcMain.handle('fs:openPath', (_e, p) => shell.openPath(p));
   ipcMain.handle('fs:cleanBuild', async (_e, root) => {

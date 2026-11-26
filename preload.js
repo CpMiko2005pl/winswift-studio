@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('api', {
 
   settings: root => invoke('project:settings', root),
   setSettings: (root, patch) => invoke('project:setSettings', root, patch),
+  createXcodeProject: root => invoke('project:createXcode', root),
   localizations: root => invoke('project:localizations', root),
   localize: (root, file, lang) => invoke('project:localize', root, file, lang),
   copyLocalization: (root, file, lang) => invoke('project:copyLocalization', root, file, lang),

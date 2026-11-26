@@ -2679,6 +2679,7 @@ function menuTemplate(name) {
         { id: 'new-group', label: 'Group', enabled: hasProj },
       ] },
       { id: 'add-files', label: S.root ? `Add Files to “${S.name}”…` : 'Add Files…', accel: 'CmdOrCtrl+Alt+A', enabled: hasProj },
+      { id: 'create-xcodeproj', label: 'Create Xcode Project (.xcodeproj)…', enabled: hasProj && !S.isPackage },
       { type: 'separator' },
       { id: 'open', label: 'Open Folder…', accel: 'CmdOrCtrl+O' },
       { id: 'open-file', label: 'Open File…', accel: 'CmdOrCtrl+Shift+Alt+O' },
@@ -2912,6 +2913,15 @@ const COMMANDS = {
   'open-file': cmdOpenFile,
   'close-tab': () => S.active && closeTab(S.active),
   'close-project': async () => { if (await confirmDiscardAll()) closeProject(false); },
+  'create-xcodeproj': async () => {
+    if (!S.root) return;
+    try {
+      const proj = await api.createXcodeProject(S.root);
+      toast(L(`Utworzono ${basename(proj)} — ten folder otworzysz teraz w Xcode na Macu. Pliki z kompilacji (.build) nie trafią do gita.`,
+        `Created ${basename(proj)} — this folder now opens in Xcode on a Mac. Build output (.build) stays out of git.`), 7000);
+      await loadTree(); renderTree();
+    } catch (e) { toast(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 7000); }
+  },
   'save': () => saveDoc(activeDoc()),
   'save-all': saveAll,
   'revert': async () => { const d = activeDoc(); if (!d) return; const r = await api.read(d.path); d.model.setValue(r.content); d.saved = d.model.getAlternativeVersionId(); onDocChanged(d); },

@@ -132,6 +132,16 @@ const FONT_FAMILY = {
 
 let overlays = [];
 
+const geometryObserver = new ResizeObserver(entries => {
+  for (const { target, contentRect } of entries) {
+    const width = Math.round(contentRect.width), height = Math.round(contentRect.height);
+    if (target.isConnected && width > 0 && height > 0 && (width !== target._width || height !== target._height)) {
+      target._width = width; target._height = height;
+      send('geometry', target.dataset.measure, [width, height]);
+    }
+  }
+});
+
 function build(n, ctx) {
   let el;
   switch (n.t) {
@@ -157,6 +167,14 @@ function build(n, ctx) {
     case 'divider': el = div('divider'); if (ctx.axis === 'h') el._V = true; else el._H = true; break;
     case 'color': el = div('color'); el.style.background = n.p.c; el._H = el._V = true; break;
     case 'shape': el = buildShape(n); break;
+    case 'map': el = buildMap(n, ctx); break;
+    case 'canvas': {
+      el = div('drawing-canvas');
+      const svg = svgEl('svg', { width: '100%', height: '100%' }, el);
+      for (const p of n.p.paths) svgEl('path', { d: p.d, fill: p.fill || 'none', stroke: p.stroke || 'none', 'stroke-width': p.width || 1 }, svg);
+      el._H = el._V = true;
+      break;
+    }
     case 'chart': el = buildChart(n); break;
     case 'button': el = buildButton(n, ctx); break;
     case 'navlink': el = buildNavLinkInline(n, ctx); break;
@@ -190,7 +208,15 @@ function build(n, ctx) {
     default: el = div('x');
   }
   if (n.p && n.p.unavailable) el.classList.add('unavailable');
-  return applyMods(el, n, ctx);
+  if (n.p?.measure) {
+    el.dataset.measure = n.id; el._width = n.p.w; el._height = n.p.h;
+    geometryObserver.observe(el);
+  }
+  const result = applyMods(el, n, ctx);
+  result.dataset.viewId = mod(n, 'matched')?.id ?? n.id;
+  result._animation = mod(n, 'animation');
+  result._transition = mod(n, 'transition')?.kind;
+  return result;
 }
 
 function buildText(n) {
@@ -228,7 +254,8 @@ function buildImage(n) {
   }
   const img = document.createElement('img');
   img.className = 'img' + (n.p.resizable ? ' resizable' : '');
-  img.src = 'file:///' + n.p.src.replace(/\\/g, '/');
+  const parts = n.p.src.replace(/\\/g, '/').split('/');
+  img.src = 'file:///' + parts.map((part, index) => index === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)).join('/');
   img.draggable = false;
   img._H = img._V = !!n.p.resizable;
   // an image without .resizable() is drawn at its size in points (pixels ÷ the asset's 1x/2x/3x scale)
@@ -368,6 +395,55 @@ function buildPathShape(n) {
 // ------------------------------------------------------------------ Swift Charts (drawn as SVG at the laid-out size)
 
 const CHART_PALETTE = ['var(--blue)', 'var(--green)', 'var(--orange)', 'var(--purple)', 'var(--red)', 'var(--teal)', 'var(--yellow)', 'var(--pink)', 'var(--indigo)', 'var(--brown)'];
+
+const loadedMaps = new Set();
+function buildMap(n, ctx) {
+  const el = div('sim-map');
+  el._H = el._V = true;
+  const pins = flat(n.c).filter(c => c.t === 'marker');
+  const avg = key => pins.reduce((sum, p) => sum + p.p[key], 0) / (pins.length || 1);
+  const center = { lat: n.p.lat ?? avg('lat'), lon: n.p.lon ?? avg('lon') };
+  const spread = Math.max(0.02, ...pins.map(p => Math.max(Math.abs(p.p.lon - center.lon), Math.abs(p.p.lat - center.lat)) * 3));
+  const span = Math.max(0.001, n.p.span || spread);
+  const z = Math.max(0, Math.min(18, Math.round(Math.log2(360 / span))));
+  const tiles = 2 ** z;
+  function point(p) {
+    const lat = Math.max(-85, Math.min(85, p.lat)) * Math.PI / 180;
+    return [(p.lon + 180) / 360 * tiles, (1 - Math.asinh(Math.tan(lat)) / Math.PI) / 2 * tiles];
+  }
+  const [cx, cy] = point(center);
+  function place(item, x, y) {
+    item.style.left = 'calc(50% + ' + Math.round((x - cx) * 256) + 'px)';
+    item.style.top = 'calc(50% + ' + Math.round((y - cy) * 256) + 'px)';
+    el.appendChild(item);
+  }
+  for (const pin of pins) {
+    const label = div('map-pin');
+    if (pin.p.symbol) label.appendChild(sym(pin.p.symbol));
+    for (const c of flat(pin.c)) label.appendChild(build(c, ctx));
+    label.append(document.createTextNode(pin.p.title));
+    place(label, ...point(pin.p));
+  }
+  const button = document.createElement('button');
+  button.textContent = 'Load OpenStreetMap';
+  const loadTiles = () => {
+    loadedMaps.add(n.id);
+    const rx = Math.ceil(el.clientWidth / 512) + 1, ry = Math.ceil(el.clientHeight / 512) + 1;
+    for (let y = Math.max(0, Math.floor(cy) - ry); y <= Math.min(tiles - 1, Math.floor(cy) + ry); y++) {
+      for (let x = Math.floor(cx) - rx; x <= Math.floor(cx) + rx; x++) {
+        const img = new Image(); img.alt = ''; img.className = 'map-tile';
+        img.src = 'https://tile.openstreetmap.org/' + z + '/' + ((x % tiles + tiles) % tiles) + '/' + y + '.png';
+        place(img, x, y);
+      }
+    }
+    button.textContent = '© OpenStreetMap contributors';
+    button.onclick = () => window.sim.openLink('https://www.openstreetmap.org/copyright');
+  };
+  button.onclick = loadTiles;
+  el.appendChild(button);
+  if (loadedMaps.has(n.id)) requestAnimationFrame(() => { if (el.isConnected) loadTiles(); });
+  return el;
+}
 
 function buildChart(n) {
   const el = div('chart');
@@ -850,7 +926,12 @@ function buildDatePicker(n, ctx) {
 function buildProgress(n) {
   if (n.p.v == null || n.p.style === 'circular') {
     const w = div('spinner-wrap');
-    w.appendChild(div('spinner'));
+    if (n.p.v == null) w.appendChild(div('spinner'));
+    else {
+      const svg = svgEl('svg', { width: 20, height: 20, viewBox: '0 0 20 20', 'aria-label': Math.round(n.p.v * 100) + '%' }, w);
+      svgEl('circle', { cx: 10, cy: 10, r: 8, stroke: 'var(--separator)', fill: 'none', 'stroke-width': 3 }, svg);
+      svgEl('circle', { cx: 10, cy: 10, r: 8, stroke: 'var(--tint)', fill: 'none', 'stroke-width': 3, pathLength: 1, 'stroke-dasharray': Math.max(0, Math.min(1, n.p.v)) + ' 1', transform: 'rotate(-90 10 10)' }, svg);
+    }
     if (n.p.title) { const t = div('text'); t.textContent = n.p.title; w.appendChild(t); }
     return w;
   }
@@ -1161,7 +1242,16 @@ function screenMeta(screen) {
     backHidden: findMod(nodes, 'backHidden').length > 0,
     toolbar,
     search: findMod(nodes, 'searchable')[0],
+    suggestions: findMod(nodes, 'suggestions')[0]?.v,
+    colors: findMod(nodes, 'toolbarColor'), backgrounds: findMod(nodes, 'toolbarBackground'),
   };
+}
+
+function colorToolbar(element, meta, bar) {
+  const applies = m => (m.bars.length ? m.bars : ['nav']).includes(bar);
+  const color = meta.colors.find(applies), visibility = meta.backgrounds.find(applies);
+  if (visibility?.hidden) element.style.background = 'transparent';
+  else if (color) element.style.background = color.v;
 }
 
 function buildToolbarItems(items, place) {
@@ -1193,6 +1283,7 @@ function buildNav(n, ctx) {
 
   if (!meta.hidden) {
     const nb = div('navbar');
+    colorToolbar(nb, meta, 'nav');
     const bar = div('bar');
     const left = div('left'), right = div('right');
     if (depth > 0 && !meta.backHidden) {
@@ -1226,6 +1317,14 @@ function buildNav(n, ctx) {
       inp.value = meta.search.v || '';
       inp.dataset.fid = meta.search.id;
       inp.addEventListener('input', () => { remember(meta.search.id, inp.value); send('text', meta.search.id, inp.value); });
+      if (meta.suggestions?.length) {
+        const choices = document.createElement('datalist'); choices.id = 'choices-' + meta.search.id;
+        for (const item of flat(meta.suggestions)) {
+          const option = document.createElement('option'); option.value = mod(item, 'searchCompletion')?.v ?? textOf(item);
+          choices.appendChild(option);
+        }
+        inp.setAttribute('list', choices.id); s.appendChild(choices);
+      }
       s.appendChild(inp);
       nb.appendChild(s);
     }
@@ -1240,6 +1339,7 @@ function buildNav(n, ctx) {
   const bottomItems = buildToolbarItems(meta.toolbar, 'bottom');
   if (bottomItems.length) {
     const tb = div('tabbar');
+    colorToolbar(tb, meta, 'bottom');
     tb.style.height = '83px'; tb.style.justifyContent = 'space-around'; tb.style.alignItems = 'flex-start'; tb.style.paddingTop = '12px';
     bottomItems.forEach(b => tb.appendChild(b));
     scr.appendChild(tb);
@@ -1314,6 +1414,37 @@ function applyMods(el, n, ctx) {
   const transforms = [];
   for (const m of n.m || []) {
     switch (m.k) {
+      case 'refreshable': {
+        let startY;
+        cur.addEventListener('pointerdown', e => { startY = e.clientY; });
+        cur.addEventListener('pointerup', e => {
+          const scroller = e.target.closest('[data-sid]');
+          if (startY != null && e.clientY - startY > 55 && !scroller?.scrollTop) send('tap', m.id);
+          startY = null;
+        });
+        break;
+      }
+      case 'scrollTarget': cur.style.scrollSnapType = 'both mandatory'; break;
+      case 'scrollTargets':
+        if (m.enabled) for (const child of cur.children) child.style.scrollSnapAlign = 'start';
+        break;
+      case 'keyPress': {
+        if (cur.tabIndex < 0) cur.tabIndex = 0;
+        cur.addEventListener('keydown', event => {
+          const key = ({ Enter: '\r', Tab: '\t', Escape: '\x1b', ArrowUp: '\uf700', ArrowDown: '\uf701', ArrowLeft: '\uf702', ArrowRight: '\uf703' })[event.key] ?? event.key;
+          if (m.key === key) send('tap', m.id);
+          else if (m.key == null && [...key].length === 1) send('text', m.id, key);
+        });
+        break;
+      }
+      case 'focused': {
+        const input = el.matches('input,textarea') ? el : el.querySelector('input,textarea');
+        if (!input) break;
+        input.dataset.focusActive = String(m.active);
+        input.onfocus = () => { if (!m.active) send('bool', m.id, true); };
+        input.onblur = () => { if (input.isConnected && m.active) send('bool', m.id, false); };
+        break;
+      }
       case 'padding': {
         cur = wrap(cur);
         const v = m.v ?? 16;
@@ -1428,7 +1559,7 @@ function applyMods(el, n, ctx) {
       case 'contextMenu': {
         const items = m.v;
         const target = cur;
-        cur.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); showPopMenu(target, menuItems(items)); });
+        cur.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); showPopMenu(target, menuItems(items), m.preview); });
         break;
       }
       case 'ignoresSafeArea': cur.classList.add('isa'); cur._isa = true; cur.style.position = 'fixed'; cur.style.inset = '0'; cur.style.zIndex = '0'; break;
@@ -1685,9 +1816,10 @@ function renderOverlays() {
   screenEl.classList.toggle('sheet-open', sheetOpen);
 }
 
-function showPopMenu(anchor, items) {
+function showPopMenu(anchor, items, preview) {
   closePopMenu();
   const menu = div('popmenu');
+  if (preview?.length) menu.appendChild(buildContent(preview));
   for (const it of items) {
     const mi = div('mi' + (it.destructive ? ' destructive' : ''));
     if (items.some(i => i.checked !== undefined)) {
@@ -1697,7 +1829,7 @@ function showPopMenu(anchor, items) {
     }
     mi.appendChild(document.createTextNode(it.label || ''));
     if (it.icon) mi.appendChild(sym(it.icon));
-    mi.addEventListener('click', e => { e.stopPropagation(); closePopMenu(); if (it.act) it.act(); });
+    mi.addEventListener('click', e => { e.stopPropagation(); if (it.sub) { showPopMenu(anchor, menuItems(it.sub.p.items)); return; } closePopMenu(); if (it.act) it.act(); });
     menu.appendChild(mi);
   }
   overlayRoot.appendChild(menu);
@@ -1717,8 +1849,42 @@ function closePopMenu() { if (openPopup) { openPopup.remove(); openPopup = null;
 
 // ------------------------------------------------------------------ frame rendering
 
+function motionState(el) {
+  const rect = el.getBoundingClientRect(), css = getComputedStyle(el);
+  return { x: rect.left, y: rect.top, w: rect.width, h: rect.height, opacity: css.opacity, transform: css.transform, value: el._animation?.value, el };
+}
+
+function animateFrame(previous, transaction) {
+  const scale = screenEl.getBoundingClientRect().width / SCREEN_W || 1;
+  for (const el of appRoot.querySelectorAll('[data-view-id]')) {
+    const old = previous.get(el.dataset.viewId);
+    previous.delete(el.dataset.viewId);
+    const a = el._animation;
+    const params = a && (a.value === undefined || old?.value !== a.value) ? a.params : transaction;
+    if (!params?.length || params[0] <= 0) continue;
+    const current = motionState(el);
+    const options = { duration: params[0] * 1000, easing: params[1], delay: params[2] * 1000, fill: 'backwards' };
+    if (!old) {
+      if (el._transition && el._transition !== 'identity') {
+        const from = el._transition === 'scale' ? 'scale(.01)' : el._transition === 'slide' ? 'translateX(-25%)' : current.transform;
+        el.animate([{ opacity: 0, transform: from }, { opacity: current.opacity, transform: current.transform }], options);
+      }
+      continue;
+    }
+    if (old.opacity === current.opacity && old.transform === current.transform && old.x === current.x && old.y === current.y && old.w === current.w && old.h === current.h) continue;
+    const transform = old.transform !== current.transform ? old.transform :
+      'translate(' + ((old.x-current.x)/scale) + 'px,' + ((old.y-current.y)/scale) + 'px) scale(' + (old.w/(current.w || 1)) + ',' + (old.h/(current.h || 1)) + ')';
+    el.animate([{ opacity: old.opacity, transform }, { opacity: current.opacity, transform: current.transform }], options);
+  }
+}
+
 function render() {
   if (!tree) return;
+  const transaction = tree[0]?.p?.transaction;
+  const previousMotion = new Map();
+  for (const el of appRoot.querySelectorAll('[data-view-id]')) {
+    if (transaction || el._animation || el._transition) previousMotion.set(el.dataset.viewId, motionState(el));
+  }
   // remember focus, caret and scroll positions so re-renders feel seamless
   const ae = document.activeElement;
   let focus = null;
@@ -1726,6 +1892,7 @@ function render() {
   const scrolls = {};
   document.querySelectorAll('[data-sid]').forEach(el => { if (el.scrollTop || el.scrollLeft) scrolls[el.dataset.sid] = [el.scrollTop, el.scrollLeft]; });
 
+  geometryObserver.disconnect();
   overlays = [];
   const schemeMod = findMod(tree, 'scheme')[0];
   const wanted = schemeMod && schemeMod.v ? schemeMod.v : (forcedScheme || theme);
@@ -1735,17 +1902,21 @@ function render() {
   content.style.flex = '1 1 auto';
   const root = div('root');
   root.appendChild(content);
+  if (ae?.dataset.focusActive != null) ae.onblur = null;
   appRoot.replaceChildren(root);
   closePopMenu();
   renderOverlays();
+  if (previousMotion.size || transaction) animateFrame(previousMotion, transaction);
 
   document.querySelectorAll('[data-sid]').forEach(el => {
     const s = scrolls[el.dataset.sid];
     if (s) { el.scrollTop = s[0]; el.scrollLeft = s[1]; }
   });
+  const requestedFocus = appRoot.querySelector('[data-focus-active="true"]');
+  if (requestedFocus && requestedFocus.dataset.fid !== focus?.id) { requestedFocus.focus(); focus = null; }
   if (focus) {
     const el = document.querySelector(`[data-fid="${CSS.escape(focus.id)}"]`);
-    if (el) {
+    if (el && el.dataset.focusActive !== 'false') {
       // a frame echoing something we typed earlier is stale: keep the newer text in the field.
       // Anything else came from the program itself (e.g. clearing the field) and wins.
       const recent = lastSentText[focus.id] || [];
@@ -2064,7 +2235,7 @@ function normalize(nodes) {
     n.c = normalize(n.c || []);
     n.m = n.m || [];
     for (const k of ['header', 'footer', 'items', 'label']) if (Array.isArray(n.p[k])) normalize(n.p[k]);
-    for (const m of n.m) for (const k of ['v', 'buttons']) if (Array.isArray(m[k]) && m[k].length && typeof m[k][0] === 'object' && m[k][0] && 't' in m[k][0]) normalize(m[k]);
+    for (const m of n.m) for (const k of ['v', 'buttons', 'preview']) if (Array.isArray(m[k]) && m[k].length && typeof m[k][0] === 'object' && m[k][0] && 't' in m[k][0]) normalize(m[k]);
   }
   return nodes;
 }
@@ -2078,6 +2249,7 @@ window.sim.onFrame(json => {
 
 window.sim.onPermission(showPermission);
 window.sim.onShook(shakeDevice);
+window.sim.onFeedback?.(toast);
 window.sim.onHome(() => { showHome(); renderHome(); });
 window.sim.onToggleAppearance(toggleAppearance);
 window.sim.onCustomLocation(showCustomLocation);
@@ -2099,6 +2271,7 @@ window.sim.onState(st => {
     running = true;
     tree = null;
     navDepth = {};
+    FX_SEEN.clear(); loadedMaps.clear();
     lastSentText = {};
     appRoot.replaceChildren();
     overlayRoot.replaceChildren();

@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('sim', {
   onState: on('sim:state'),
   onPermission: on('sim:permission'),
   onShook: on('sim:shook'),
+  onFeedback: on('sim:feedback'),
   onHome: on('sim:home'),
   onToggleAppearance: on('sim:toggleAppearance'),
   onCustomLocation: on('sim:customLocation'),

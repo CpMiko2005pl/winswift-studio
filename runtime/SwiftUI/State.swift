@@ -164,6 +164,7 @@ public enum ColorScheme: Hashable, Sendable { case light, dark }
 public struct EnvironmentValues {
     var objects: [ObjectIdentifier: AnyObject] = [:]
     var custom: [ObjectIdentifier: Any] = [:]
+    public var openURL = OpenURLAction { _ in .systemAction }
     public var dismiss = DismissAction(action: {})
     public var colorScheme: ColorScheme = _currentScheme
     public var isEnabled = true
@@ -289,42 +290,45 @@ public struct FocusState<Value: Hashable>: _DynamicProperty {
     public func _install(key: String, ctx: _Ctx) { state._install(key: key, ctx: ctx) }
 }
 
-// MARK: - Animation (accepted, not animated)
+// MARK: - Animation
 
 public struct Animation: Equatable, Sendable {
+    var duration: Double = 0.35, delaySeconds: Double = 0
+    var timing: String = "ease-in-out"
+    var json: [_J] { [.n(duration), .s(timing), .n(delaySeconds)] }
     public static let `default` = Animation()
-    public static let linear = Animation()
-    public static let easeIn = Animation()
-    public static let easeOut = Animation()
+    public static let linear = Animation(timing: "linear")
+    public static let easeIn = Animation(timing: "ease-in")
+    public static let easeOut = Animation(timing: "ease-out")
     public static let easeInOut = Animation()
-    public static let spring = Animation()
-    public static let bouncy = Animation()
-    public static let smooth = Animation()
-    public static let snappy = Animation()
-    public static func linear(duration: Double) -> Animation { Animation() }
-    public static func easeIn(duration: Double) -> Animation { Animation() }
-    public static func easeOut(duration: Double) -> Animation { Animation() }
-    public static func easeInOut(duration: Double) -> Animation { Animation() }
-    public static func spring(response: Double = 0.5, dampingFraction: Double = 0.8, blendDuration: Double = 0) -> Animation { Animation() }
-    public static func spring(duration: Double = 0.5, bounce: Double = 0) -> Animation { Animation() }
-    public static func interactiveSpring() -> Animation { Animation() }
-    public func delay(_ d: Double) -> Animation { self }
-    public func speed(_ s: Double) -> Animation { self }
+    public static let spring = Animation(duration: 0.5, timing: "cubic-bezier(.22,1.25,.36,1)")
+    public static let bouncy = spring, smooth = easeInOut, snappy = easeOut
+    public static func linear(duration: Double) -> Animation { Animation(duration: duration, timing: "linear") }
+    public static func easeIn(duration: Double) -> Animation { Animation(duration: duration, timing: "ease-in") }
+    public static func easeOut(duration: Double) -> Animation { Animation(duration: duration, timing: "ease-out") }
+    public static func easeInOut(duration: Double) -> Animation { Animation(duration: duration) }
+    public static func spring(response: Double = 0.5, dampingFraction: Double = 0.8, blendDuration: Double = 0) -> Animation { spring(duration: response) }
+    public static func spring(duration: Double = 0.5, bounce: Double = 0) -> Animation { Animation(duration: duration, timing: spring.timing) }
+    public static func interactiveSpring() -> Animation { spring }
+    public func delay(_ d: Double) -> Animation { var copy = self; copy.delaySeconds += d; return copy }
+    public func speed(_ s: Double) -> Animation { var copy = self; copy.duration /= max(0.01, s); return copy }
     public func repeatForever(autoreverses: Bool = true) -> Animation { self }
     public func repeatCount(_ n: Int, autoreverses: Bool = true) -> Animation { self }
 }
 
 @discardableResult
 public func withAnimation<Result>(_ animation: Animation? = .default, _ body: () throws -> Result) rethrows -> Result {
-    try body()
+    defer { if let animation { _Runtime.shared.animateNextUpdate(animation) } }
+    return try body()
 }
 
 public struct AnyTransition: Sendable {
+    var kind = "opacity"
     public static let opacity = AnyTransition()
-    public static let scale = AnyTransition()
-    public static let slide = AnyTransition()
-    public static let identity = AnyTransition()
-    public static func move(edge: Edge) -> AnyTransition { AnyTransition() }
+    public static let scale = AnyTransition(kind: "scale")
+    public static let slide = AnyTransition(kind: "slide")
+    public static let identity = AnyTransition(kind: "identity")
+    public static func move(edge: Edge) -> AnyTransition { .slide }
     public static func asymmetric(insertion: AnyTransition, removal: AnyTransition) -> AnyTransition { AnyTransition() }
     public func combined(with other: AnyTransition) -> AnyTransition { self }
     public func animation(_ a: Animation?) -> AnyTransition { self }

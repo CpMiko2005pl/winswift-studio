@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell, screen } = require('electron');
+const { app, clipboard, BrowserWindow, ipcMain, dialog, Menu, shell, screen } = require('electron');
 const path = require('path');
 const crypto = require('crypto');
 const https = require('https');
@@ -7,7 +7,9 @@ const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
 const { spawn, execFile } = require('child_process');
-const { rewriteForWindows, parseStrings, codeMask, literalEnd } = require('./buildtools');
+const { AsyncLocalStorage } = require('async_hooks');
+const buildContext = new AsyncLocalStorage();
+const { rewriteForWindows, rewriteModels, parseStrings, codeMask, stripPreviews } = require('./buildtools');
 const license = require('./activation.js');   // not './license' — on Windows that finds the LICENSE file
 const updater = require('./updater');
 
@@ -15,7 +17,7 @@ const IGNORED_DIRS = new Set(['.build', '.git', '.swiftpm', 'node_modules', '.vs
 
 // the app was renamed (SwiftCode → WinSwift Studio): keep settings, recent projects and the built runtime where they were
 app.setName('WinSwift Studio');
-app.setPath('userData', path.join(app.getPath('appData'), 'SwiftCode'));
+app.setPath('userData', (!app.isPackaged && process.env.SWIFTCODE_DEBUG && process.env.WINSWIFT_TEST_DIR) || path.join(app.getPath('appData'), 'SwiftCode'));
 
 let win = null;
 let toolEnv = null;          // process env refreshed from the registry (new installs show up without a reboot)
@@ -92,7 +94,7 @@ function knownSdkRoot() {
 async function refreshEnv() {
   const env = {};
   for (const [k, v] of Object.entries(process.env)) env[k] = v;
-  const reg = await readRegistryEnv();
+  const reg = await readRegistryEnv().catch(() => null);
   const pathParts = [];
   if (reg) {
     for (const scope of [reg.m || {}, reg.u || {}]) {
@@ -174,6 +176,7 @@ function writeOverlay(env, vc, sdk) {
     { name: path.join(vc, 'include'), type: 'directory', contents: [file('module.modulemap', 'vcruntime.modulemap'), file('vcruntime.apinotes', 'vcruntime.apinotes')] },
   ];
   const out = path.join(app.getPath('userData'), 'swift-overlay.yaml');
+  fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify({ version: 0, 'case-sensitive': 'false', roots }, null, 2));
   vfsOverlay = out;
 }
@@ -332,7 +335,7 @@ async function createProject({ template, name, org, location }) {
   const root = path.join(location, safe);
   if (fs.existsSync(root) && fs.readdirSync(root).length) throw new Error(`Folder "${root}" already exists and is not empty.`);
   await fsp.mkdir(root, { recursive: true });
-  if (template === 'ios-app' || template === 'ios-sample') return createIOSProject(root, safe, org, template);
+  if (['ios-app', 'ios-sample', 'ios-api', 'ios-data', 'ios-document'].includes(template)) return createIOSProject(root, safe, org, template);
   if (template === 'package') {
     const ident = safe.replace(/[^A-Za-z0-9_]/g, '_');
     await fsp.writeFile(path.join(root, 'Package.swift'),
@@ -594,11 +597,14 @@ struct ${ident}App: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-        }
+        }${template === 'ios-data' ? '.modelContainer(for: Note.self)' : ''}
     }
 }
 `);
-  if (template === 'ios-sample') {
+  if (['ios-api', 'ios-data', 'ios-document'].includes(template)) {
+    const source = path.join(__dirname, 'runtime', 'Templates', template + '.swift');
+    await fsp.copyFile(source, path.join(group, 'ContentView.swift'));
+  } else if (template === 'ios-sample') {
     for (const [f, body] of Object.entries(IOS_SAMPLE)) await fsp.writeFile(path.join(group, f), fileHeader(f, name) + body);
   } else {
     await fsp.writeFile(path.join(group, 'ContentView.swift'), fileHeader('ContentView.swift', name) +
@@ -645,7 +651,10 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-function ev(type, data) { send('build:event', { type, ...data }); }
+function ev(type, data) {
+  const run = buildContext.getStore();
+  if (!run || run.id === jobSeq) send('build:event', { type, reportId: run?.reportId, ...data });
+}
 
 const DIAG_RE = /^(.+?):(\d+):(\d+): (error|warning|note|remark): (.*)$/;
 
@@ -666,6 +675,8 @@ function lineSplitter(onLine) {
 }
 
 function runTool(cmd, args, cwd, { hideWarningsFrom } = {}) {
+  const run = buildContext.getStore();
+  if (run && run.id !== jobSeq) return Promise.resolve(-1);
   // compiler-ish process: every line goes to the build log, diagnostics are parsed out
   return new Promise(resolve => {
     let hiding = false;
@@ -738,7 +749,7 @@ const SWIFTUI_SRC = path.join(__dirname, 'runtime', 'SwiftUI');
 
 // Apple frameworks whose API lives in SwiftCode's SwiftUI module. Each gets a tiny module that re-exports SwiftUI,
 // so `import UIKit` resolves for SourceKit exactly like the build's import rewriting does.
-const APPLE_STUB_MODULES = ['UIKit', 'Combine', 'CoreLocation', 'CoreLocationUI', 'MapKit', 'AVFoundation', 'PhotosUI', 'Charts'];
+const APPLE_STUB_MODULES = ['UIKit', 'Combine', 'CoreLocation', 'CoreLocationUI', 'MapKit', 'AVFoundation', 'PhotosUI', 'SwiftData', 'UniformTypeIdentifiers', 'Charts'];
 
 let runtimeBuild = null;   // in-flight runtime build, shared by the build and SourceKit
 
@@ -750,10 +761,15 @@ function runtimeDirFor(swiftVersion) {
   return { dir: path.join(app.getPath('userData'), 'swiftui', hash.digest('hex').slice(0, 12)), files };
 }
 
-function quietTool(cmd, args, cwd) {
+const backgroundTools = new Set();
+function quietTool(cmd, args, cwd, onSpawn) {
   return new Promise(resolve => {
-    execFile(cmd, args, { cwd, env: toolEnv, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) =>
-      resolve({ code: err ? (err.code ?? 1) : 0, output: String(stdout || '') + String(stderr || '') }));
+    const proc = execFile(cmd, args, { cwd, env: toolEnv, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      backgroundTools.delete(proc);
+      resolve({ code: err ? (err.code ?? 1) : 0, output: String(stdout || '') + String(stderr || '') });
+    });
+    backgroundTools.add(proc);
+    onSpawn?.(proc);
   });
 }
 
@@ -763,15 +779,16 @@ async function ensureStubModules(dir) {
   if (!fs.existsSync(stub)) await fsp.writeFile(stub, '@_exported import SwiftUI\n');
   for (const m of APPLE_STUB_MODULES) {
     if (fs.existsSync(path.join(dir, `${m}.swiftmodule`))) continue;
-    await quietTool(swiftc, ['-parse-as-library', '-module-name', m, '-swift-version', '5', ...swiftFlags(), '-I', dir,
+    const result = await quietTool(swiftc, ['-parse-as-library', '-module-name', m, '-swift-version', '5', ...swiftFlags(), '-I', dir,
       '-emit-module', '-emit-module-path', path.join(dir, `${m}.swiftmodule`), stub], dir);
+    if (result.code !== 0) throw Error(result.output || 'Could not prepare module ' + m);
   }
 }
 
 async function ensureSwiftUIRuntime(swiftVersion, { silent = false } = {}) {
   const { dir, files } = runtimeDirFor(swiftVersion);
-  if (fs.existsSync(path.join(dir, 'SwiftUI.lib')) && fs.existsSync(path.join(dir, 'SwiftUI.swiftmodule'))) return dir;
   if (runtimeBuild) return runtimeBuild;
+  if (fs.existsSync(path.join(dir, 'SwiftUI.lib')) && fs.existsSync(path.join(dir, 'SwiftUI.swiftmodule'))) return dir;
   runtimeBuild = (async () => {
     await fsp.mkdir(dir, { recursive: true });
     if (!silent) ev('log', { text: 'Building SwiftUI for Windows runtime (first build only, takes a minute)…' });
@@ -788,56 +805,11 @@ async function ensureSwiftUIRuntime(swiftVersion, { silent = false } = {}) {
   try { return await runtimeBuild; } finally { runtimeBuild = null; }
 }
 
-const SWIFTUI_IMPORT = /^\s*(@preconcurrency\s+)?import\s+SwiftUI\b/m;
-
-/** Blank out `#Preview { … }` blocks (keeping newlines so line numbers stay put) and return their bodies. */
-function stripPreviews(src) {
-  const chars = src.split('');
-  const previews = [];
-  const re = /#Preview\b/g;
-  // a commented-out `// #Preview { … }` (or one inside a string) must stay as it is: blanking from there
-  // to some later `}` would cut real code out of the file
-  const inCode = codeMask(src);
-  let m;
-  while ((m = re.exec(src))) {
-    if (!inCode[m.index]) continue;
-    let i = m.index + m[0].length;
-    const skipWs = () => { while (i < src.length && /\s/.test(src[i])) i++; };
-    const matchBlock = (open, close) => {
-      let depth = 0;
-      for (; i < src.length; i++) {
-        const c = src[i];
-        // strings ("…", """…""", #"…"#) and comments don't count
-        const end = (c === '"' || c === '/' || c === '#') ? literalEnd(src, i) : -1;
-        if (end > i) { i = end - 1; continue; }
-        if (c === open) depth++;
-        else if (c === close) { depth--; if (depth === 0) { i++; return true; } }
-      }
-      return false;
-    };
-    skipWs();
-    let title = null;
-    if (src[i] === '(') {
-      const s = i;
-      if (!matchBlock('(', ')')) continue;
-      const t = src.slice(s, i).match(/^\(\s*"([^"]*)"/);
-      if (t) title = t[1];
-      skipWs();
-    }
-    if (src[i] !== '{') continue;
-    const bodyStart = i;
-    if (!matchBlock('{', '}')) continue;
-    const body = src.slice(bodyStart + 1, i - 1);
-    previews.push({ title, body, line: src.slice(0, m.index).split('\n').length });
-    for (let k = m.index; k < i; k++) if (chars[k] !== '\n') chars[k] = ' ';
-    re.lastIndex = i;
-  }
-  return { code: chars.join(''), previews };
-}
+const SWIFTUI_IMPORT = /^\s*(?:@preconcurrency\s+|@_exported\s+)?import\s+(?:SwiftUI|UIKit|Combine|CoreLocation|CoreLocationUI|MapKit|AVFoundation|PhotosUI|SwiftData|Charts)\b/m;
 
 async function isSwiftUIProject(root) {
   const files = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
-  for (const f of files.slice(0, 200)) {
+  for (const f of files) {
     try { if (SWIFTUI_IMPORT.test(await fsp.readFile(f, 'utf8'))) return true; } catch {}
   }
   return false;
@@ -870,15 +842,17 @@ async function buildSwiftUIProject(root, files, swiftVersion, preview, opts = {}
     // the canvas previews what's in the editor, saved or not
     const override = opts.overrides && opts.overrides[f.toLowerCase()];
     let src = override != null ? override : await fsp.readFile(f, 'utf8');
-    if (path.basename(f).toLowerCase() === 'main.swift') hasMain = true;
+    const namedMain = path.basename(f).toLowerCase() === 'main.swift';
     const { code, previews } = stripPreviews(src);
     if (preview && !previewFound && norm(f) === norm(preview.file) && previews.length) previewFound = previews[Math.min(preview.index || 0, previews.length - 1)];
     let body = rewriteForWindows(code, state);
-    const m = body.match(/^[ \t]*@main\b[\s\S]*?\b(?:struct|class|enum)\s+(\w+)/m);
+    const mask = codeMask(body);
+    const m = [...body.matchAll(/@main\b[\s\S]*?\b(?:struct|class|enum)\s+(\w+)/g)].find(token => mask[token.index]);
+    if (namedMain && !m) hasMain = true;
     // the preview build (and an app with UIKit overrides) gets SwiftCode's own entry point instead of the app's @main
-    if (m) { mainType = mainType || m[1]; body = body.replace(/^([ \t]*)@main\b/m, '$1/*@main*/'); }
+    if (m) { mainType = mainType || m[1]; body = body.slice(0, m.index) + '     ' + body.slice(m.index + 5); }
     const literal = f.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const base = path.basename(f).toLowerCase() === 'main.swift' ? 'main.swift' : `${i++}_${path.basename(f)}`;
+    const base = namedMain && !m ? 'main.swift' : `${i++}_${path.basename(f)}`;
     const target = path.join(srcDir, base);
     // every file sees SwiftUI (it carries the Foundation fixes and the UIKit/Combine/CoreLocation types)
     await fsp.writeFile(target, `import SwiftUI\n#sourceLocation(file: "${literal}", line: 1)\n${body}\n#sourceLocation()\n`);
@@ -907,7 +881,8 @@ async function buildSwiftUIProject(root, files, swiftVersion, preview, opts = {}
   if (!hasMain) args.push('-parse-as-library');
   args.push(...inputs);
   if (quiet) {
-    const r = await quietTool(findOnPath('swiftc.exe'), args, root);
+    if (opts.cancelled?.()) return { ok: false, errors: [] };
+    const r = await quietTool(findOnPath('swiftc.exe'), args, root, opts.onCompiler);
     const errors = [];
     for (const line of r.output.split(/\r?\n/)) {
       const m = line.match(DIAG_RE);
@@ -1250,14 +1225,15 @@ function runProgram(cmd, args, cwd, debugRun, extraEnv = {}) {
       return resolve(-1);
     }
     job = { proc, kind: 'run' };
+    proc.stdin.on('error', () => {});
     ev('running', { pid: proc.pid, debug: !!debugRun });
     if (debugRun) debugRun.attach(proc.pid);
-    proc.once('close', () => debugStop());
+    proc.once('close', () => { if (dbg?.pid === proc.pid) debugStop(); });
     proc.stdout.setEncoding('utf8'); proc.stderr.setEncoding('utf8');
     proc.stdout.on('data', d => ev('stdout', { text: d }));
     proc.stderr.on('data', d => ev('stderr', { text: d }));
     proc.on('error', e => ev('stderr', { text: String(e) + '\n' }));
-    proc.on('close', (code, signal) => { job = null; resolve(signal ? signal : code); });
+    proc.on('close', (code, signal) => { if (job?.proc === proc) job = null; resolve(signal ? signal : code); });
   });
 }
 
@@ -1446,7 +1422,8 @@ async function geocode(rq) {
 
 /** Requests the running app sends (`\u001eRQ {json}`): permission prompts, GPS, geocoding, URLs. */
 async function handleAppRequest(rq, appName) {
-  const reply = v => sendToApp({ k: 'rs', id: rq.rid, v });
+  const owner = job;
+  const reply = v => { if (job === owner) sendToApp({ k: 'rs', id: rq.rid, v }); };
   switch (rq.k) {
     case 'permission': {
       const prev = device().perms[appName]?.[rq.kind];
@@ -1456,9 +1433,34 @@ async function handleAppRequest(rq, appName) {
     }
     case 'location': setLocationFeed(rq.on); return;
     case 'geocode': case 'geocodeAddress': reply(await geocode(rq)); return;
+    case 'feedback': simSend('sim:feedback', String(rq.kind)); return;
+    case 'importFile': {
+      const extensions = { 'public.plain-text': 'txt', 'public.text': 'txt', 'public.json': 'json' };
+      const types = (rq.types || []).map(t => extensions[t]).filter(Boolean);
+      const result = await dialog.showOpenDialog(simWin, { properties: ['openFile'], filters: types.length ? [{ name: 'Documents', extensions: types }] : [] });
+      reply(result.canceled ? null : result.filePaths[0]);
+      return;
+    }
+    case 'exportFile': {
+      const result = await dialog.showSaveDialog(simWin, { defaultPath: path.basename(String(rq.name || 'Document')) });
+      reply(result.canceled ? null : result.filePath);
+      return;
+    }
+    case 'pickPhoto': {
+      const result = await dialog.showOpenDialog(simWin, { properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
+      reply(result.canceled ? null : result.filePaths[0]);
+      return;
+    }
+    case 'share': {
+      const r = await dialog.showMessageBox(simWin, { message: String(rq.text), buttons: ['Copy', 'Cancel'], cancelId: 1 });
+      if (r.response === 0) clipboard.writeText(String(rq.text));
+      return;
+    }
     case 'openURL':
-      if (/^app-settings:/i.test(rq.url)) simSend('sim:openSettings', appName);
-      else if (/^(https?|mailto|tel|maps):/i.test(rq.url)) shell.openExternal(rq.url);
+      if (/^app-settings:/i.test(rq.url)) { simSend('sim:openSettings', appName); reply(true); }
+      else if (/^(https?|mailto|tel|maps):/i.test(rq.url) && !process.env.SWIFTCODE_NO_EXTERNAL) {
+        try { await shell.openExternal(rq.url); reply(true); } catch { reply(false); }
+      } else reply(false);
       return;
     case 'endEditing': simSend('sim:endEditing'); return;
     default: return;
@@ -1479,13 +1481,7 @@ async function setSimLanguage(lang) {
   if (device().language === lang) return;
   setDevice({ language: lang });
   simSend('sim:language', lang);
-  if (job && job.ios && lastIOSRun) {
-    const { exe, root, appName } = lastIOSRun;
-    await stopJob();
-    const code = await runIOSApp(exe, root, appName);
-    ev('exit', { code });
-    ev('done', { ok: true, phase: 'run' });
-  }
+  if (job?.ios && lastIOSRun) send('app:command', 'run');
 }
 
 function setSimLocation(loc) {
@@ -1562,10 +1558,12 @@ function runIOSApp(exe, root, appName, debugRun, launch = {}) {
       ev('stderr', { text: String(e) + '\n' });
       return resolve(-1);
     }
-    job = { proc, kind: 'run', ios: true };
+    const running = { proc, kind: 'run', ios: true };
+    job = running;
+    proc.stdin.on('error', () => {});
     ev('running', { pid: proc.pid, ios: true, debug: !!debugRun });
     if (debugRun) debugRun.attach(proc.pid);
-    proc.once('close', () => debugStop());
+    proc.once('close', () => { if (dbg?.pid === proc.pid) debugStop(); });
     simSend('sim:state', { state: 'running', app: appName });
     proc.stdout.setEncoding('utf8'); proc.stderr.setEncoding('utf8');
     let buf = '';
@@ -1595,22 +1593,20 @@ function runIOSApp(exe, root, appName, debugRun, launch = {}) {
     proc.on('close', (code, signal) => {
       job = null;
       setLocationFeed(false);
-      simSend('sim:state', { state: 'exited', code: signal ? 0 : code, stopped: !!stopRequested });
-      stopRequested = false;
+      simSend('sim:state', { state: 'exited', code: signal ? 0 : code, stopped: !!running.stopping });
       resolve(signal ? signal : code);
     });
   });
 }
 
-let stopRequested = false;
-
 let jobSeq = 0;
 
 async function startJob({ root, action, preview, debug, breakpoints }) {
-  if (job) await stopJob();
-  const id = ++jobSeq;
+  const { id } = buildContext.getStore();
+  if (id !== jobSeq) return;
   await refreshEnv();
   const tc = await toolchainInfo();
+  if (id !== jobSeq) return;
   if (!tc.found) {
     ev('toolchain-missing', {});
     ev('done', { id, action, ok: false, phase: 'build' });
@@ -1623,6 +1619,7 @@ async function startJob({ root, action, preview, debug, breakpoints }) {
     ensureSimWindow(action === 'run');
     simSend('sim:state', { state: 'building', app: path.basename(root) });
   }
+  if (id !== jobSeq) return;
   const t0 = Date.now();
   const res = isPackage ? await buildPackage(root) : await buildFolderProject(root, tc.version, preview);
   ev('build-end', { id, ok: res.ok, ms: Date.now() - t0 });
@@ -1648,18 +1645,27 @@ async function startJob({ root, action, preview, debug, breakpoints }) {
   ev('done', { id, action, ok: true, phase: 'run' });
 }
 
+let activeBuild = Promise.resolve();
+
 async function stopJob() {
+  ++jobSeq;
+  const previous = activeBuild;
+  await terminateJob();
+  await previous;
+}
+
+async function terminateJob() {
   // a program paused in LLDB can't exit until the debugger lets go: end the session first (Xcode's Stop does the same)
-  if (job && dbg) await debugStop(true);
+  const target = job;
+  if (!target) return false;
+  target.stopping = true;
+  if (dbg?.pid === target.proc.pid) await debugStop(true);
   return new Promise(resolve => {
-    if (!job) return resolve(false);
-    const { proc } = job;
-    stopRequested = true;
+    if (job !== target || target.proc.exitCode !== null) return resolve(true);
+    const { proc } = target;
     const done = () => resolve(true);
     proc.once('close', done);
-    execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true }, () => {
-      setTimeout(() => { if (job && job.proc === proc) { job = null; resolve(true); } }, 1500);
-    });
+    killProcessTree(proc);
   });
 }
 
@@ -1675,7 +1681,7 @@ function dapWrite(state, msg) {
 
 function dapRequest(state, command, args, timeout = 20000) {
   return new Promise(resolve => {
-    if (!state) return resolve(null);
+    if (!state || state.proc.exitCode !== null || state.proc.stdin.destroyed) return resolve(null);
     const seq = state.seq++;
     const t = setTimeout(() => { state.pending.delete(seq); resolve(null); }, timeout);
     state.pending.set(seq, r => { clearTimeout(t); resolve(r); });
@@ -1686,7 +1692,7 @@ function dapRequest(state, command, args, timeout = 20000) {
 function dapWaitEvent(state, name, timeout = 10000) {
   return new Promise(resolve => {
     const t = setTimeout(() => { state.waiters.delete(w); resolve(null); }, timeout);
-    const w = m => { if (m.event === name) { clearTimeout(t); state.waiters.delete(w); resolve(m); } };
+    const w = m => { if (!m || m.event === name) { clearTimeout(t); state.waiters.delete(w); resolve(m); } };
     state.waiters.add(w);
   });
 }
@@ -1753,20 +1759,22 @@ function openGate(gate) { if (gate) try { fs.writeFileSync(gate, '1'); } catch {
 async function debugAttach(pid, breakpoints, gate) {
   await debugStop();
   const exe = findOnPath('lldb-dap.exe');
-  if (!exe) { openGate(gate); return false; }
+  if (!exe || job?.proc.pid !== pid) { openGate(gate); return false; }
   let proc;
   try { proc = spawn(exe, [], { env: toolEnv, windowsHide: true }); } catch { openGate(gate); return false; }
   const state = { proc, buf: Buffer.alloc(0), seq: 1, pending: new Map(), waiters: new Set(), pid };
   dbg = state;
+  proc.stdin.on('error', () => {});
   proc.stdout.on('data', d => onDapData(state, d));
   proc.stderr.on('data', () => {});
   proc.on('error', () => {});
-  proc.on('exit', () => { for (const p of state.pending.values()) p(null); state.pending.clear(); if (dbg === state) { dbg = null; send('debug:event', { event: 'ended' }); } });
+  proc.on('close', () => { for (const w of [...state.waiters]) w(null); for (const p of state.pending.values()) p(null); state.pending.clear(); if (dbg === state) { dbg = null; send('debug:event', { event: 'ended' }); } });
   const init = await dapRequest(state, 'initialize', { clientID: 'swiftcode', clientName: 'WinSwift Studio', adapterID: 'lldb-dap', linesStartAt1: true, columnsStartAt1: true, pathFormat: 'path', supportsVariableType: true, supportsVariablePaging: true });
-  if (!init?.success) { openGate(gate); await debugStop(); return false; }
+  if (!init?.success || dbg !== state) { openGate(gate); if (dbg === state) await debugStop(); return false; }
   const initialized = dapWaitEvent(state, 'initialized', 15000);
   const attach = dapRequest(state, 'attach', { pid, stopOnEntry: false }, 30000);
   await initialized;
+  if (dbg !== state) { openGate(gate); return false; }
   await debugSetBreakpoints(breakpoints, state);
   await dapRequest(state, 'setExceptionBreakpoints', { filters: [] });
   await dapRequest(state, 'configurationDone', {});
@@ -1819,6 +1827,8 @@ function debugPrepare(opts) {
 
 let canvasProc = null;
 let canvasSeq = 0;
+let canvasBuild = Promise.resolve();
+let canvasCompiler = null;
 
 function canvasEvent(e) { send('preview:event', e); }
 
@@ -1832,17 +1842,23 @@ function canvasKill() {
   });
 }
 
-async function canvasStart({ root, file, index = 0, scheme, overrides }) {
-  const seq = ++canvasSeq;
-  await canvasKill();
+function cancelCanvas() {
+  ++canvasSeq;
+  if (canvasCompiler?.pid && canvasCompiler.exitCode === null) killProcessTree(canvasCompiler);
+  return canvasKill();
+}
+
+async function canvasStart({ root, file, index = 0, scheme, overrides }, seq) {
   if (seq !== canvasSeq) return;
   canvasEvent({ type: 'building', seq });
   if (!toolEnv) await refreshEnv();
   const tc = await toolchainInfo();
   if (!tc.found) { canvasEvent({ type: 'error', seq, errors: [{ message: 'Swift toolchain not found' }] }); return; }
+  if (seq !== canvasSeq) return;
   const files = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
   const t0 = Date.now();
-  const res = await buildSwiftUIProject(root, files, tc.version, { file, index }, { quiet: true, overrides });
+  const res = await buildSwiftUIProject(root, files, tc.version, { file, index }, { quiet: true, overrides, cancelled: () => canvasSeq !== seq, onCompiler: p => { canvasCompiler = p; } });
+  canvasCompiler = null;
   if (seq !== canvasSeq) return;
   if (!res.ok) { canvasEvent({ type: 'error', seq, errors: res.errors || [] }); return; }
   const dev = device();
@@ -1865,6 +1881,7 @@ async function canvasStart({ root, file, index = 0, scheme, overrides }) {
     return;
   }
   canvasProc = proc;
+  proc.stdin.on('error', () => {});
   canvasEvent({ type: 'running', seq, ms: Date.now() - t0 });
   if (scheme) proc.stdin.write('\u001eEV ' + JSON.stringify({ k: 'scheme', id: '', v: scheme }) + '\n');
   proc.stdout.setEncoding('utf8'); proc.stderr.setEncoding('utf8');
@@ -1877,7 +1894,7 @@ async function canvasStart({ root, file, index = 0, scheme, overrides }) {
       buf = buf.slice(i + 1);
       const mark = line.indexOf(UI_MARK);
       if (mark > 0) line = line.slice(mark);
-      if (line.startsWith(UI_MARK)) canvasEvent({ type: 'frame', seq, json: line.slice(UI_MARK.length) });
+      if (seq === canvasSeq && line.startsWith(UI_MARK)) canvasEvent({ type: 'frame', seq, json: line.slice(UI_MARK.length) });
     }
     if (buf && buf[0] !== '\u001e') { const mk = buf.indexOf('\u001e'); buf = mk < 0 ? '' : buf.slice(mk); }
   });
@@ -1886,40 +1903,55 @@ async function canvasStart({ root, file, index = 0, scheme, overrides }) {
   proc.on('close', code => {
     if (canvasProc === proc) canvasProc = null;
     // a preview that dies on its own crashed (e.g. fatalError in the view)
-    if (seq === canvasSeq && code !== null && code !== 0 && code !== 1) canvasEvent({ type: 'crashed', seq, code, message: errTail.trim().split(/\r?\n/).slice(-6).join('\n') });
+    if (seq === canvasSeq && code !== null && code !== 0) canvasEvent({ type: 'crashed', seq, code, message: errTail.trim().split(/\r?\n/).slice(-6).join('\n') });
   });
 }
 
 // ---------------------------------------------------------------- SourceKit-LSP (completion, live issues, Quick Help, refactoring)
 
+let lspGeneration = 0;
 let lsp = null;           // { proc, root, buf, pending, nextId, files }
 
-/** compile_commands.json describing the project the way the build compiles it, so SourceKit sees the same module. */
-async function writeCompileDatabase(root) {
-  if (fs.existsSync(path.join(root, 'Package.swift'))) return null;   // SwiftPM projects describe themselves
-  const files = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
-  if (!files.length) return null;
-  const sources = await Promise.all(files.map(f => fsp.readFile(f, 'utf8').catch(() => '')));
-  const ui = sources.some(s => SWIFTUI_IMPORT.test(s) || /^\s*import\s+(UIKit|Combine|CoreLocation|MapKit|Charts)\b/m.test(s));
-  const hasMain = files.some(f => path.basename(f).toLowerCase() === 'main.swift');
-  const args = ['swiftc', '-module-name', moduleName(path.basename(root)), ...swiftFlags()];
+/** Describe both the file list and the source features that change the compiler invocation. */
+async function compilationInputs(root) {
+  if (fs.existsSync(path.join(root, 'Package.swift'))) return null;
+  const files = (await collectFiles(root, p => p.toLowerCase().endsWith('.swift'))).sort();
+  const sources = await Promise.all(files.map(f => fsp.readFile(f, 'utf8')));
+  const ui = sources.some(s => SWIFTUI_IMPORT.test(s));
+  const hasMainFile = files.some((f, i) => path.basename(f).toLowerCase() === 'main.swift' && !/^\s*@main\b/m.test(sources[i]));
+  const library = !hasMainFile && (ui || files.length > 1 || sources.some(s => /^\s*@main\b/m.test(s)));
+  const models = sources.map(s => ui && s.includes('@Model') ? rewriteModels(s) : null);
+  const key = crypto.createHash('sha1').update(JSON.stringify([files, ui, library, models])).digest('hex');
+  return { files, ui, library, models, key };
+}
+
+async function writeCompileDatabase(root, inputs) {
+  inputs ??= await compilationInputs(root);
+  if (!inputs) return null;
+  const { files, ui, library, models, key } = inputs;
+  const dir = path.join(root, '.build', 'swiftcode');
+  await fsp.mkdir(dir, { recursive: true });
+  const args = [findOnPath('swiftc.exe') || 'swiftc', '-module-name', moduleName(path.basename(root)), ...swiftFlags()];
   if (ui) {
     const tc = await toolchainInfo();
     const rt = await ensureSwiftUIRuntime(tc.version, { silent: true });
-    if (rt) {
-      await ensureStubModules(rt);
-      args.push('-swift-version', '5', '-enable-bare-slash-regex', '-I', rt, '-Xfrontend', '-import-module', '-Xfrontend', 'SwiftUI');
-    }
-    if (!hasMain) args.push('-parse-as-library');
-  } else if (!hasMain && (files.length > 1 || sources.some(s => /^\s*@main\b/m.test(s)))) {
-    args.push('-parse-as-library');
+    if (!rt) throw Error('SwiftUI module is unavailable');
+    await ensureStubModules(rt);
+    args.push('-swift-version', '5', '-enable-bare-slash-regex', '-I', rt, '-Xfrontend', '-import-module', '-Xfrontend', 'SwiftUI');
   }
-  args.push(...files);
-  const dir = path.join(root, '.build', 'swiftcode');
-  await fsp.mkdir(dir, { recursive: true });
+  if (library) args.push('-parse-as-library');
+  // The open document uses its original URI. Peer files need the same model conformance on disk as in the editor.
+  const peers = await Promise.all(files.map(async (file, i) => {
+    if (!models[i]) return file;
+    const peer = path.join(dir, 'sourcekit-models', path.relative(root, file));
+    await fsp.mkdir(path.dirname(peer), { recursive: true });
+    await fsp.writeFile(peer, models[i]);
+    return peer;
+  }));
+  const entries = files.map(file => ({ directory: root, file, arguments: [...args, ...files.map((f, i) => f === file ? file : peers[i])] }));
   const db = path.join(dir, 'compile_commands.json');
-  await fsp.writeFile(db, JSON.stringify(files.map(f => ({ directory: root, file: f, arguments: args })), null, 1));
-  return { db, files };
+  await fsp.writeFile(db, JSON.stringify(entries, null, 1));
+  return { db, key };
 }
 
 function lspWrite(state, msg) {
@@ -1957,16 +1989,22 @@ function onLspData(state, chunk) {
     } else if (msg.id != null && msg.method) {
       // requests from the server: answer what a simple client can
       let result = null;
+      if (state === lsp && msg.method === 'client/registerCapability' && msg.params?.registrations?.some(r => r.method === 'textDocument/diagnostic')) {
+        state.pullDiagnostics = true;
+        send('lsp:notification', { method: 'swiftcode/diagnosticsRegistered' });
+      }
+      if (state === lsp && msg.method === 'workspace/diagnostic/refresh') send('lsp:notification', { method: 'swiftcode/refreshDiagnostics' });
       if (msg.method === 'workspace/configuration') result = (msg.params?.items || []).map(() => null);
-      if (msg.method === 'workspace/applyEdit') { send('lsp:notification', { method: 'swiftcode/applyEdit', params: msg.params }); result = { applied: true }; }
+      if (state === lsp && msg.method === 'workspace/applyEdit') { send('lsp:notification', { method: 'swiftcode/applyEdit', params: msg.params }); result = { applied: true }; }
       lspWrite(state, { jsonrpc: '2.0', id: msg.id, result });
     } else if (msg.method === 'textDocument/publishDiagnostics' || msg.method === '$/progress' || msg.method === 'window/showMessage') {
-      send('lsp:notification', { method: msg.method, params: msg.params });
+      if (state === lsp) send('lsp:notification', { method: msg.method, params: msg.params });
     }
   }
 }
 
 async function lspStop() {
+  lspGeneration++;
   const state = lsp;
   lsp = null;
   if (!state) return;
@@ -1978,20 +2016,25 @@ async function lspStop() {
 }
 
 async function lspStart(root) {
-  await lspStop();
+  const stopping = lspStop();
+  const generation = lspGeneration;
+  await stopping;
   if (!toolEnv) await refreshEnv();
   const exe = findOnPath('sourcekit-lsp.exe');
   if (!exe || !root) return { ok: false, reason: 'sourcekit-lsp.exe not found' };
   send('lsp:notification', { method: 'swiftcode/status', params: { state: 'starting' } });
-  const db = await writeCompileDatabase(root).catch(() => null);
+  let db;
+  try { db = await writeCompileDatabase(root); } catch (error) { return { ok: false, reason: error.message }; }
+  if (generation !== lspGeneration) return { ok: false };
   let proc;
   try { proc = spawn(exe, [], { cwd: root, env: toolEnv, windowsHide: true }); } catch (e) { return { ok: false, reason: String(e) }; }
-  const state = { proc, root, buf: Buffer.alloc(0), pending: new Map(), nextId: 1, files: db ? db.files : null };
+  const state = { proc, root, buf: Buffer.alloc(0), pending: new Map(), nextId: 1, compileKey: db?.key };
   lsp = state;
+  proc.stdin.on('error', () => {});
   proc.stdout.on('data', d => onLspData(state, d));
   proc.stderr.on('data', () => {});
   proc.on('error', () => {});
-  proc.on('exit', () => {
+  proc.on('close', () => {
     for (const p of state.pending.values()) p.resolve(null);
     state.pending.clear();
     if (lsp === state) { lsp = null; send('lsp:notification', { method: 'swiftcode/status', params: { state: 'stopped' } }); }
@@ -2003,7 +2046,7 @@ async function lspStart(root) {
     workspaceFolders: [{ uri: rootUri, name: path.basename(root) }],
     initializationOptions: { compilationDatabase: { searchPaths: ['.build/swiftcode'] } },
     capabilities: {
-      workspace: { applyEdit: true, workspaceEdit: { documentChanges: true }, configuration: true, didChangeWatchedFiles: { dynamicRegistration: false } },
+      workspace: { diagnostics: { refreshSupport: true }, applyEdit: true, workspaceEdit: { documentChanges: true }, configuration: true, didChangeWatchedFiles: { dynamicRegistration: false } },
       window: { workDoneProgress: true },
       textDocument: {
         synchronization: { didSave: true, dynamicRegistration: false },
@@ -2013,14 +2056,18 @@ async function lspStart(root) {
         definition: { linkSupport: false }, references: {}, documentHighlight: {}, documentSymbol: { hierarchicalDocumentSymbolSupport: true },
         codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: ['quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'refactor.rewrite', 'source'] } } },
         formatting: {}, rangeFormatting: {}, rename: { prepareSupport: true },
-        publishDiagnostics: { relatedInformation: true, codeDescriptionSupport: true },
+        diagnostic: { dynamicRegistration: true },
+        publishDiagnostics: { versionSupport: true, relatedInformation: true, codeDescriptionSupport: true },
       },
     },
   }, 120000);
-  if (!init || init.error || lsp !== state) return { ok: false, reason: init?.error?.message || 'SourceKit did not start' };
+  if (!init || init.error || lsp !== state) {
+    if (state === lsp) await lspStop();
+    return { ok: false, reason: init?.error?.message || 'SourceKit did not start' };
+  }
   lspWrite(state, { jsonrpc: '2.0', method: 'initialized', params: {} });
   send('lsp:notification', { method: 'swiftcode/status', params: { state: 'ready' } });
-  return { ok: true, capabilities: init.result?.capabilities || {} };
+  return { ok: true, pullDiagnostics: !!state.pullDiagnostics, capabilities: init.result?.capabilities || {} };
 }
 
 /** Called when files appear or disappear: SourceKit needs a fresh compile_commands.json. */
@@ -2029,14 +2076,13 @@ const lspFilesChanged = (() => {
   return root => {
     clearTimeout(t);
     t = setTimeout(async () => {
-      if (!lsp || norm(lsp.root) !== norm(root)) return;
-      const files = await collectFiles(root, p => p.toLowerCase().endsWith('.swift'));
-      const key = files.map(f => f.toLowerCase()).sort().join('|');
-      const old = (lsp.files || []).map(f => f.toLowerCase()).sort().join('|');
-      if (key === old) return;
-      const db = await writeCompileDatabase(root).catch(() => null);
-      if (!db || !lsp) return;
-      lsp.files = db.files;
+      const state = lsp;
+      if (!state || norm(state.root) !== norm(root)) return;
+      const inputs = await compilationInputs(root).catch(() => null);
+      if (!inputs || inputs.key === state.compileKey || lsp !== state) return;
+      const db = await writeCompileDatabase(root, inputs).catch(() => null);
+      if (!db || lsp !== state) return;
+      state.compileKey = db.key;
       lspWrite(lsp, { jsonrpc: '2.0', method: 'workspace/didChangeWatchedFiles', params: { changes: [{ uri: pathToFileURL(db.db).href, type: 2 }] } });
     }, 800);
   };
@@ -2045,6 +2091,7 @@ const lspFilesChanged = (() => {
 // ---------------------------------------------------------------- IPC
 
 function registerIpc() {
+  ipcMain.handle('git:command', (_e, root, action, value) => require('./source-control').sourceControl(root, action, value));
   ipcMain.handle('debug:request', async (_e, command, args) => {
     if (!dbg) return null;
     // the first `po` warms up LLDB's Swift/Clang importer, which can take a while
@@ -2055,10 +2102,14 @@ function registerIpc() {
   ipcMain.handle('debug:active', () => !!dbg);
   ipcMain.handle('preview:start', (_e, opts) => {
     if (license.isLocked()) { canvasEvent({ type: 'error', seq: canvasSeq, errors: [{ message: 'WinSwift Studio is not activated' }] }); send('license:changed', license.state()); return false; }
-    canvasStart(opts).catch(e => canvasEvent({ type: 'error', seq: canvasSeq, errors: [{ message: String(e?.message || e) }] }));
+    const stopping = cancelCanvas(), seq = canvasSeq;
+    canvasBuild = Promise.all([canvasBuild, stopping]).then(() => canvasStart(opts, seq)).catch(e => {
+      canvasCompiler = null;
+      if (seq === canvasSeq) canvasEvent({ type: 'error', seq, errors: [{ message: String(e?.message || e) }] });
+    });
     return true;
   });
-  ipcMain.handle('preview:stop', () => { canvasSeq++; return canvasKill(); });
+  ipcMain.handle('preview:stop', () => cancelCanvas());
   ipcMain.handle('preview:input', (_e, ev) => {
     if (canvasProc && canvasProc.stdin.writable) canvasProc.stdin.write('\u001eEV ' + JSON.stringify(ev) + '\n');
   });
@@ -2232,7 +2283,17 @@ function registerIpc() {
   ipcMain.handle('toolchain:info', async (_e, refresh) => { if (refresh) await refreshEnv(); return toolchainInfo(); });
   ipcMain.handle('build:start', (_e, opts) => {
     if (license.isLocked()) { ev('log', { text: 'WinSwift Studio is not activated — enter an activation code first.' }); ev('done', { ok: false, phase: 'build' }); send('license:changed', license.state()); return false; }
-    startJob(opts).catch(e => { ev('log', { text: String(e?.stack || e) }); ev('done', { ok: false, phase: 'build' }); });
+    const id = ++jobSeq;
+    const previous = activeBuild;
+    const stopping = terminateJob();
+    activeBuild = buildContext.run({ id, reportId: opts.reportId }, async () => {
+      try {
+        await Promise.all([previous, stopping]);
+        if (id === jobSeq) await startJob(opts);
+      } catch (e) {
+        ev('log', { text: String(e?.stack || e) }); ev('done', { ok: false, phase: 'build' });
+      }
+    });
     return true;
   });
   ipcMain.handle('build:stop', () => stopJob());
@@ -2482,7 +2543,15 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => app.quit());
+function killProcessTree(proc) {
+  if (!proc?.pid || proc.exitCode !== null) return;
+  try { execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true }, error => {
+    if (error && proc.exitCode === null) try { proc.kill(); } catch {}
+  }); } catch { try { proc.kill(); } catch {} }
+}
 app.on('before-quit', () => {
-  if (lsp) try { lsp.proc.kill(); } catch {}
-  if (canvasProc) try { execFile('taskkill', ['/PID', String(canvasProc.pid), '/T', '/F'], { windowsHide: true }); } catch {}
+  ++jobSeq; ++canvasSeq; ++lspGeneration;
+  watcher?.close();
+  setLocationFeed(false);
+  for (const proc of [job?.proc, dbg?.proc, canvasProc, lsp?.proc, ...backgroundTools]) killProcessTree(proc);
 });

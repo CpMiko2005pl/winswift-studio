@@ -961,3 +961,8 @@ html.light .xc-pc-line { background: rgba(52, 199, 89, .16); }
 html.light .tpl-icon { box-shadow: 0 4px 10px rgba(0, 0, 0, .15); }
 html.light .scheme-side small { color: rgba(255, 255, 255, .85); }
 html.light .item-row mark { background: rgba(255, 204, 0, .45); }
+
+#git-controls { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; }
+#git-list, #git-output { padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.git-file { display: flex; justify-content: space-between; gap: 4px; }
+.git-file button { text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }

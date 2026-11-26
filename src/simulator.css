@@ -434,3 +434,10 @@ html.canvas-mode #bezel { box-shadow: 0 0 0 2px #4b4b50 inset, 0 0 0 3px #111 in
 .fx-pulse1 { animation: fx-pulse .8s ease-in-out; }
 .fx-pulse { animation: fx-pulse 1.2s ease-in-out infinite; }
 .fx-wiggle { animation: fx-wiggle .4s ease-in-out 2; display: inline-block; }
+.drawing-canvas, .sim-map { position: relative; overflow: hidden; min-width: 1px; min-height: 1px; }
+.drawing-canvas svg { position: absolute; inset: 0; }
+.sim-map { background: #dce9df; isolation: isolate; }
+.map-tile, .map-pin, .sim-map button { position: absolute; }
+.map-tile { width: 256px; height: 256px; z-index: -1; }
+.map-pin { transform: translate(-50%, -100%); display: grid; justify-items: center; color: #74212a; background: white; border-radius: 8px; padding: 3px 6px; font: 12px Inter, sans-serif; }
+.sim-map button { bottom: 4px; right: 4px; font-size: 11px; }

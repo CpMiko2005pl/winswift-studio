@@ -348,7 +348,8 @@ public struct ToolbarItemGroup<Content: View>: View, _PrimitiveView {
 }
 
 public struct ToolbarPlacement: Sendable {
-    public static let navigationBar = ToolbarPlacement(), tabBar = ToolbarPlacement(), bottomBar = ToolbarPlacement(), automatic = ToolbarPlacement()
+    let name: String
+    public static let navigationBar = Self(name: "nav"), tabBar = Self(name: "tab"), bottomBar = Self(name: "bottom"), automatic = Self(name: "nav")
 }
 
 public enum NavigationBarItem {
@@ -363,8 +364,8 @@ extension View {
     public func toolbar(_ visibility: Visibility, for bars: ToolbarPlacement...) -> some View {
         _ModifiedView(content: self, key: "toolbarVisibility") { _ in ["v": .s(visibility == .hidden ? "hidden" : "visible")] }
     }
-    public func toolbarBackground<S: ShapeStyle>(_ style: S, for bars: ToolbarPlacement...) -> some View { self }
-    public func toolbarBackground(_ visibility: Visibility, for bars: ToolbarPlacement...) -> some View { self }
+    public func toolbarBackground<S: ShapeStyle>(_ style: S, for bars: ToolbarPlacement...) -> some View { _mod("toolbarColor", ["v": style._css, "bars": .a(bars.map { .s($0.name) })]) }
+    public func toolbarBackground(_ visibility: Visibility, for bars: ToolbarPlacement...) -> some View { _mod("toolbarBackground", ["hidden": .b(visibility == .hidden), "bars": .a(bars.map { .s($0.name) })]) }
     public func toolbarColorScheme(_ scheme: ColorScheme?, for bars: ToolbarPlacement...) -> some View { self }
     public func toolbarTitleDisplayMode(_ mode: NavigationBarItem.TitleDisplayMode) -> some View { navigationBarTitleDisplayMode(mode) }
 
@@ -422,6 +423,14 @@ extension View {
             ctx.graph.textSetters[ctx.path + "~search"] = { text.wrappedValue = $0 }
             return ["id": .s(ctx.path + "~search"), "v": .s(text.wrappedValue), "ph": .s(prompt ?? _systemString("Search"))]
         }
+    }
+    public func searchCompletion(_ value: String) -> some View { _mod("searchCompletion", ["v": .s(value)]) }
+    public func searchSuggestions<S: View>(@ViewBuilder _ suggestions: () -> S) -> some View {
+        let items = AnyView(suggestions())
+        return _ModifiedView(content: self, key: "suggestions") { ctx in ["v": .nodes(items._render(ctx.child("items")))] }
+    }
+    public func searchable<S: View>(text: Binding<String>, placement: SearchFieldPlacement = .automatic, prompt: String? = nil, @ViewBuilder suggestions: () -> S) -> some View {
+        searchable(text: text, placement: placement, prompt: prompt).searchSuggestions(suggestions)
     }
     public func searchable(text: Binding<String>, placement: SearchFieldPlacement = .automatic, prompt: Text) -> some View {
         searchable(text: text, placement: placement, prompt: prompt.segs.map(\.s).joined())

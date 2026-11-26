@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   reveal: p => invoke('fs:reveal', p),
   openPath: p => invoke('fs:openPath', p),
   cleanBuild: root => invoke('fs:cleanBuild', root),
+  git: (root, action, value) => invoke('git:command', root, action, value),
   search: (root, q, opts) => invoke('search', root, q, opts),
   importFiles: (dir, files) => invoke('fs:import', dir, files),
   openImagesDialog: () => invoke('dialog:openImages'),

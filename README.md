@@ -47,6 +47,14 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
 | **Debugger LLDB** — breakpointy na marginesie, *Continue / Step Over / Into / Out* (F6/F7/F8), zmienne, stos wywołań, konsola `(lldb)` z `po` i `p`, podgląd wartości po najechaniu. | <img src="docs/screenshots/debugger.png" width="480" alt="Debugger"> |
 | <img src="docs/screenshots/library.png" width="480" alt="Library"> | **Jak w Xcode** — Canvas z `#Preview`, podpowiedzi i błędy na żywo (SourceKit-LSP), Quick Help, Rename, Code Actions, Open Quickly, Find &amp; Replace w projekcie, Library (Views, Modifiers, Snippets, SF Symbols, Colors, Images), Edit Scheme, nawigatory, motyw jasny i ciemny, własne skróty klawiszowe. |
 
+### Nowości w 1.6.0
+
+- **Edytor.** Lista Issues, podkreślenia Monaco i czerwone banery uwzględniają wersję dokumentu. Edycja i wczytanie zmienionego pliku z dysku usuwają stare wyniki. Diagnostyki kompilatora i SourceKit są łączone.
+- **Projekty.** Szablon *App with API* pobiera listę JSON przez `URLSession`. *SwiftData App* pokazuje dodawanie i usuwanie notatek, a *Document App* otwiera i zapisuje dokumenty tekstowe przez okna wyboru pliku.
+- **Dane.** Proste klasy `@Model` z polami zgodnymi z `Codable` współpracują z `@Query`, `#Predicate` i sortowaniem. Kontener przechowuje pliki JSON w katalogu danych aplikacji symulatora. `insert` i `delete` zapisują kolekcję, a po zmianie właściwości obiektu wywołaj `try modelContext.save()`. Opcja `inMemory: true` tworzy kontener w pamięci. Relacje z cyklami i migracje schematów wykraczają poza tę implementację.
+- **Symulator.** `Map` wyświetla znaczniki i adnotacje. Przycisk *Load OpenStreetMap* wczytuje podkład kartograficzny. `PhotosPicker` wybiera lokalne zdjęcie, `Canvas` rysuje ścieżki, a `GeometryReader` otrzymuje wymiary z układu widoku. `ShareLink` pozwala skopiować udostępniany tekst. Symulator obsługuje też fokus pól, inspektor, podpowiedzi wyszukiwania oraz podstawowe animacje. Numeryczne ścieżki `KeyframeAnimator` korzystają z interpolacji liniowej.
+- **Source Control.** Nawigator Git (Ctrl+6) pokazuje zmienione pliki i ich diff. Pozwala przygotować pliki do zatwierdzenia, wykonać commit, sklonować repozytorium HTTPS oraz wykonać pull lub push. Find Navigator aktualizuje wyniki podczas pisania.
+
 **Nowość w 1.5:** wykresy **Swift Charts** (`BarMark`, `LineMark`, `PointMark`, `AreaMark`, `RuleMark`, `SectorMark`), własne kształty (`Shape`, `Path`, `.trim` — pierścienie postępu), `AsyncImage` i `URLSession` (pobieranie danych z internetu), `@Bindable`, `NavigationSplitView` z zaznaczaniem w `List`, `ViewThatFits`, `TimelineView`, `.symbolEffect`.
 
 Działają też **programy konsolowe** i **Swift Package** (`swift build`).

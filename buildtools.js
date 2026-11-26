@@ -1,33 +1,49 @@
 'use strict';
+(() => {
 // Source rewriting and resource checks shared by the build (main.js) and SwiftCode's tests.
 
 // Apple-only spellings that have to change to build on Windows (line numbers are kept).
-const APPLE_IMPORTS = /^([ \t]*(?:@preconcurrency\s+|@_exported\s+)?import\s+)(UIKit|Combine|CoreLocation|CoreLocationUI|MapKit|AVFoundation|PhotosUI|Charts)\b/gm;
+const APPLE_IMPORTS = /^([ \t]*(?:@preconcurrency\s+|@_exported\s+)?import\s+)(UIKit|Combine|CoreLocation|CoreLocationUI|MapKit|AVFoundation|PhotosUI|SwiftData|UniformTypeIdentifiers|Charts)\b/gm;
 
 // @objc / @objc(name) / @objcMembers: Swift on Windows has no Objective-C runtime and rejects them
 const OBJC_ATTR = /@objc(?:Members)?\b(?:[ \t]*\([^)\n]*\))?/g;
 
+// Keep offsets in the user's source. Swift synthesizes Codable in an extension in the same file.
+function rewriteModels(src) {
+  const names = [];
+  const mask = codeMask(src);
+  const code = src.replace(/@Model\b(?=\s+(?:(?:final|public|internal|private|fileprivate|open)\s+)*class\s+(\w+))/g, (attr, name, at) => {
+    if (!mask[at]) return attr;
+    names.push(name);
+    return ' '.repeat(attr.length);
+  });
+  return code + names.map(name => '\nextension ' + name + ': PersistentModel {}\n').join('');
+}
+
 function rewriteForWindows(src, state) {
-  let out = src.replace(APPLE_IMPORTS, '$1SwiftUI');
+  let out = replaceInCode(rewriteModels(src), APPLE_IMPORTS, (_m, prefix) => prefix + 'SwiftUI');
   // no Objective-C runtime: #selector(Foo.bar) becomes a plain Selector value
-  out = out.replace(/#selector\(\s*([^()]*(?:\([^()]*\))?[^()]*)\)/g, (_m, s) => `Selector("${s.replace(/"/g, '')}")`);
+  out = replaceInCode(out, /#selector\(\s*([^()]*(?:\([^()]*\))?[^()]*)\)/g, (_m, s) => `Selector("${s.replace(/"/g, '')}")`);
   // …and the attributes go, replaced by spaces so lines and columns of the issues stay where they were
   out = replaceInCode(out, OBJC_ATTR, m => ' '.repeat(m.length));
   // Swift can only override in an extension through Objective-C. `extension UIWindow { override func motionEnded… }`
   // (the shake recipe) therefore becomes a UIWindow subclass that SwiftCode installs as the app's window.
   const re = /\bextension\s+(UIWindow|UIResponder)\b[^{]*\{/g;
+  let mask = codeMask(out);
   let m;
   while ((m = re.exec(out))) {
+    if (!mask[m.index]) continue;
     const open = m.index + m[0].length - 1;
     const close = matchingBrace(out, open);
     if (close < 0) break;
     const body = out.slice(open + 1, close);
-    if (!/\boverride\b/.test(body)) { re.lastIndex = close; continue; }
+    if (![...body.matchAll(/\boverride\b/g)].some(token => mask[open + 1 + token.index])) { re.lastIndex = close; continue; }
     const name = `__SwiftCodeWindow${state.windowClasses.length + 1}`;
     const parent = state.windowClasses[state.windowClasses.length - 1] || 'UIWindow';
     state.windowClasses.push(name);
     const header = `open class ${name}: ${parent} {`;
     out = out.slice(0, m.index) + header + out.slice(open + 1);
+    mask = codeMask(out);
     re.lastIndex = m.index + header.length;
   }
   return out;
@@ -186,4 +202,52 @@ function parseStrings(text) {
 }
 
 
-module.exports = { rewriteForWindows, matchingBrace, replaceInCode, parseStrings, codeMask, literalEnd };
+/** Blank out `#Preview { … }` blocks (keeping newlines so line numbers stay put) and return their bodies. */
+function stripPreviews(src) {
+  const chars = src.split('');
+  const previews = [];
+  const re = /#Preview\b/g;
+  // a commented-out `// #Preview { … }` (or one inside a string) must stay as it is: blanking from there
+  // to some later `}` would cut real code out of the file
+  const inCode = codeMask(src);
+  let m;
+  while ((m = re.exec(src))) {
+    if (!inCode[m.index]) continue;
+    let i = m.index + m[0].length;
+    const skipWs = () => { while (i < src.length && /\s/.test(src[i])) i++; };
+    const matchBlock = (open, close) => {
+      let depth = 0;
+      for (; i < src.length; i++) {
+        const c = src[i];
+        // strings ("…", """…""", #"…"#) and comments don't count
+        const end = (c === '"' || c === '/' || c === '#') ? literalEnd(src, i) : -1;
+        if (end > i) { i = end - 1; continue; }
+        if (c === open) depth++;
+        else if (c === close) { depth--; if (depth === 0) { i++; return true; } }
+      }
+      return false;
+    };
+    skipWs();
+    let title = null;
+    if (src[i] === '(') {
+      const s = i;
+      if (!matchBlock('(', ')')) continue;
+      const t = src.slice(s, i).match(/^\(\s*"([^"]*)"/);
+      if (t) title = t[1];
+      skipWs();
+    }
+    if (src[i] !== '{') continue;
+    const bodyStart = i;
+    if (!matchBlock('{', '}')) continue;
+    const body = src.slice(bodyStart + 1, i - 1);
+    previews.push({ title, body, line: src.slice(0, m.index).split('\n').length, endLine: src.slice(0, i).split('\n').length });
+    for (let k = m.index; k < i; k++) if (chars[k] !== '\n' && chars[k] !== '\r') chars[k] = ' ';
+    re.lastIndex = i;
+  }
+  return { code: chars.join(''), previews };
+}
+
+const api = { stripPreviews, rewriteModels, rewriteForWindows, matchingBrace, replaceInCode, parseStrings, codeMask, literalEnd };
+if (typeof module !== 'undefined' && module.exports) module.exports = api;
+else window.swiftSource = api;
+})();

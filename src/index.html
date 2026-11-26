@@ -60,6 +60,7 @@
         <button data-nav="project" data-icon="folder" title="Project Navigator (Ctrl+1)" class="active"></button>
         <button data-nav="symbols" data-icon="symbols" title="Symbol Navigator (Ctrl+3)"></button>
         <button data-nav="find" data-icon="search" title="Find Navigator (Ctrl+4)"></button>
+        <button data-nav="source" data-icon="symbols" title="Source Control Navigator (Ctrl+6)"></button>
         <button data-nav="issues" data-icon="warning" title="Issue Navigator (Ctrl+5)"></button>
         <button data-nav="debug" data-icon="debugNav" title="Debug Navigator (Ctrl+7)"></button>
         <button data-nav="breakpoints" data-icon="breakpointsNav" title="Breakpoint Navigator (Ctrl+8)"></button>
@@ -95,6 +96,18 @@
           <div class="find-summary" id="find-summary"></div>
         </div>
         <div class="find-results" id="find-results"></div>
+      </div>
+
+      <div class="nav-panel" data-panel="source">
+        <div id="git-controls">
+          <button class="btn small" data-git="clone">Clone…</button>
+          <button class="btn small" data-git="pull">Pull</button>
+          <button class="btn small" data-git="push">Push</button>
+          <button class="btn small" data-git="commit">Commit staged…</button>
+          <button class="btn small" data-git="status">Refresh</button>
+        </div>
+        <div id="git-list"></div>
+        <pre id="git-output" aria-live="polite"></pre>
       </div>
 
       <div class="nav-panel" data-panel="issues">
@@ -401,6 +414,7 @@
 <script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
 <script src="app.js"></script>
 <script src="xcode.js"></script>
+<script src="../buildtools.js"></script>
 <script src="lsp.js"></script>
 <script src="canvas.js"></script>
 <script src="debugger.js"></script>

@@ -28,6 +28,7 @@ const S = {
   active: null,             // doc key
   docs: new Map(),          // key -> doc
   diags: [],
+  sourceRevision: 0,
   building: false,
   running: false,
   reports: [],
@@ -187,6 +188,8 @@ async function ensureDoc(p) {
   let r;
   try { r = await api.read(p); } catch (e) { toast(`Couldn’t open ${basename(p)}`); return null; }
   if (r.binary) { api.openPath(p); return null; }
+  doc = S.docs.get(key);
+  if (doc && !doc.model.isDisposed()) return doc;
   const uri = monaco.Uri.file(p);
   const model = monaco.editor.getModel(uri) || monaco.editor.createModel(r.content, languageFor(p), uri);
   model.updateOptions({ tabSize: setting('tabWidth') || 4, indentSize: setting('tabWidth') || 4, insertSpaces: setting('insertSpaces') !== false });
@@ -212,20 +215,28 @@ function onDocChanged(doc, e) {
 }
 
 async function saveDoc(doc) {
-  if (!doc || doc.kind !== 'file') return;
+  if (!doc || doc.kind !== 'file') return true;
   if (setting('formatOnSave') && /\.swift$/i.test(doc.path) && editor.getModel() === doc.model && window.swiftLspActive?.(doc.model)) {
     try { await editor.getAction('editor.action.formatDocument').run(); } catch {}
   }
   if (setting('trimWs') !== false) trimTrailingWhitespace(doc);
   try {
-    await api.write(doc.path, doc.model.getValue());
-    doc.saved = doc.model.getAlternativeVersionId();
-    doc._dirty = false;
+    const saved = doc.model.getAlternativeVersionId();
+    const contents = doc.model.getValue();
+    const write = (doc.pendingSave || Promise.resolve()).catch(() => {}).then(() => api.write(doc.path, contents));
+    doc.pendingSave = write;
+    await write;
+    if (doc.model.isDisposed()) return true;
+    if (doc.pendingSave !== write) return false;
+    doc.saved = saved;
+    doc._dirty = isDirty(doc);
     renderTabs();
     markTreeDirty();
     lspSaved(doc);
+    return !doc._dirty;
   } catch (e) {
     toast(`Couldn’t save ${basename(doc.path)}: ${e.message}`, 4000);
+    return false;
   }
 }
 
@@ -245,11 +256,14 @@ function trimTrailingWhitespace(doc) {
 }
 
 async function saveAll() {
-  for (const doc of S.docs.values()) if (isDirty(doc)) await saveDoc(doc);
+  for (const doc of S.docs.values()) if (isDirty(doc) && !(await saveDoc(doc))) return false;
+  return true;
 }
 
 function disposeDoc(doc) {
   lspClose(doc);
+  if (doc.kind === 'file') discardFileIssues(doc);
+  clearTimeout(doc.quietTimer);
   try { doc.model.dispose(); } catch {}
   S.docs.delete(doc.key);
 }
@@ -322,7 +336,7 @@ async function closeTab(key, { force = false } = {}) {
   if (!force && isDirty(doc)) {
     const r = await api.confirm(`Do you want to save the changes you made to “${basename(doc.path)}”?`, 'Your changes will be lost if you don’t save them.', ['Save', 'Don’t Save', 'Cancel']);
     if (r === 2) return false;
-    if (r === 0) await saveDoc(doc);
+    if (r === 0) { if (!(await saveDoc(doc))) return false; }
     else {
       // revert the in-memory model to disk contents
       try {
@@ -577,6 +591,10 @@ async function openProject(root, { file } = {}) {
 }
 
 function closeProject(silent) {
+  ++runSequence;
+  api.stop();
+  S.currentReport = null;
+  S.building = false; S.running = false;
   lspStopProject();
   api.previewStop();
   CV.target = null; CV.shownFor = null; CV.pinned = null; CV.building = false;
@@ -602,7 +620,7 @@ async function confirmDiscardAll() {
   if (!dirty.length) return true;
   const r = await api.confirm(`Do you want to save changes to ${dirty.length} file${dirty.length > 1 ? 's' : ''}?`, dirty.map(d => basename(d.path)).join(', '), ['Save All', 'Don’t Save', 'Cancel']);
   if (r === 2) return false;
-  if (r === 0) await saveAll();
+  if (r === 0) return saveAll();
   return true;
 }
 
@@ -633,7 +651,9 @@ function removeRecent(root) {
 
 async function loadTree() {
   if (!S.root) return;
-  S.tree = await api.tree(S.root);
+  const root = S.root;
+  const tree = await api.tree(root);
+  if (S.root === root) S.tree = tree;
 }
 
 function expandDefault(node, depth) {
@@ -664,21 +684,27 @@ api.on('project:changed', debounce(async root => {
   for (const doc of [...S.docs.values()]) {
     if (doc.kind !== 'file') continue;
     const exists = await api.exists(doc.path);
+    if (S.root !== root || doc.model.isDisposed()) continue;
     if (!exists) {
+      if (isDirty(doc)) { discardFileIssues(doc); lspClose(doc); }
       if (!isDirty(doc)) { if (S.tabs.includes(doc.key)) await closeTab(doc.key, { force: true }); disposeDoc(doc); }
       continue;
     }
     if (isDirty(doc)) continue;
     try {
       const r = await api.read(doc.path);
+      if (S.root !== root || doc.model.isDisposed() || isDirty(doc)) continue;
       if (!r.binary && r.content !== doc.model.getValue()) {
         doc.model.pushEditOperations([], [{ range: doc.model.getFullModelRange(), text: r.content }], () => null);
         doc.saved = doc.model.getAlternativeVersionId();
+        doc._dirty = false;
+        renderTabs(); markTreeDirty();
       }
     } catch {}
   }
   // pick up new Swift files
   for (const f of flattenFiles(S.tree)) if (f.name.endsWith('.swift')) await ensureDoc(f.path);
+  if (S.nav === 'source') refreshSourceControl();
   if (S.nav === 'symbols') renderSymbols();
   // the asset catalog / project editor follow the files on disk
   if (activeDoc()?.render && activeDoc().icon !== 'image') rerenderCustom();
@@ -687,11 +713,16 @@ api.on('project:changed', debounce(async root => {
 
 // ======================================================================== project navigator (tree)
 
-/** Build issues plus SourceKit's live issues; a file's live issues replace its build issues (they're newer). */
+/** Keep compiler-only issues even when SourceKit publishes an empty result. */
 function allIssues() {
   if (typeof LSP === 'undefined' || !LSP.diags.size || setting('liveIssues') === false) return S.diags;
-  const out = S.diags.filter(d => !(d.file && LSP.diags.has(norm(d.file))));
-  for (const list of LSP.diags.values()) out.push(...list);
+  const signature = d => JSON.stringify([norm(d.file), d.line, d.col, d.severity, d.message]);
+  const seen = new Set(S.diags.map(signature));
+  const out = [...S.diags];
+  for (const list of LSP.diags.values()) for (const d of list) {
+    const key = signature(d);
+    if (!seen.has(key)) { seen.add(key); out.push(d); }
+  }
   return out;
 }
 const refreshIssueViews = debounce(() => { renderIssues(); renderTree(); updateActivityIssues(); }, 150);
@@ -918,7 +949,7 @@ function startRename(row) {
     try {
       // keep open buffers: save, rename, reopen under the new path
       const affected = [...S.docs.values()].filter(d => d.kind === 'file' && (norm(d.path) === norm(p) || norm(d.path).startsWith(norm(p) + '\\')));
-      for (const d of affected) if (isDirty(d)) await saveDoc(d);
+      for (const d of affected) if (isDirty(d) && !(await saveDoc(d))) return;
       const to = await api.rename(p, name);
       const wasActive = activeDoc();
       for (const d of affected) {
@@ -926,7 +957,7 @@ function startRename(row) {
         const tabIdx = S.tabs.indexOf(d.key);
         disposeDoc(d);
         const nd = await ensureDoc(newPath);
-        if (nd && tabIdx >= 0) S.tabs[tabIdx] = nd.key;
+        if (nd && tabIdx >= 0) { S.tabs[tabIdx] = nd.key; lspOpen(nd); }
         if (nd && wasActive === d) { S.active = null; activate(nd.key); }
       }
       if (S.expanded.has(p)) { S.expanded.delete(p); S.expanded.add(to); }
@@ -988,6 +1019,7 @@ function showNav(name) {
   $$('.nav-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
   if (appEl.classList.contains('hide-nav')) toggleNavigator(true);
   $('#nav-filter').parentElement.parentElement.style.display = name === 'find' || name === 'reports' ? 'none' : '';
+  if (name === 'source') refreshSourceControl();
   if (name === 'symbols') renderSymbols();
   if (name === 'issues') renderIssues();
   if (name === 'reports') renderReports();
@@ -998,6 +1030,54 @@ function showNav(name) {
   if (name === 'project') renderTree();
 }
 $('#nav-tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) showNav(b.dataset.nav); });
+
+let gitRefresh = 0;
+async function refreshSourceControl() {
+  const root = S.root, seq = ++gitRefresh;
+  const host = $('#git-list');
+  if (!root) { host.textContent = 'Open a project or clone a repository.'; return; }
+  try {
+    const changes = await api.git(root, 'status');
+    if (seq !== gitRefresh || S.root !== root) return;
+    host.replaceChildren();
+    if (!changes.length) host.textContent = 'Working tree clean';
+    for (const { file, status } of changes) {
+      const row = document.createElement('div');
+      row.className = 'git-file';
+      const diff = document.createElement('button');
+      diff.textContent = status + '  ' + file;
+      diff.onclick = () => gitAction('diff', file);
+      const stage = document.createElement('button');
+      stage.textContent = 'Stage'; stage.disabled = status[1] === ' ';
+      stage.onclick = () => gitAction('stage', file);
+      row.append(diff, stage); host.appendChild(row);
+    }
+  } catch (e) { if (S.root === root && seq === gitRefresh) host.textContent = e.message; }
+}
+
+async function gitAction(action, value) {
+  let root = S.root;
+  const output = $('#git-output');
+  try {
+    if (action === 'status') { await refreshSourceControl(); return; }
+    if (action === 'clone') {
+      value = await promptSheet('HTTPS repository URL', '', 'Choose destination…');
+      if (!value) return;
+      root = await api.openFolderDialog();
+    }
+    if (!root) return;
+    if (action === 'commit') {
+      value = await promptSheet('Commit staged changes', '', 'Commit');
+      if (!value?.trim()) return;
+    }
+    const result = await api.git(root, action, value);
+    if (action === 'clone') await openProject(root);
+    if (S.root !== root) return;
+    output.textContent = result;
+    await refreshSourceControl();
+  } catch (e) { output.textContent = e.message; }
+}
+$('#git-controls').onclick = e => { const action = e.target.closest('[data-git]')?.dataset.git; if (action) gitAction(action); };
 
 function renderSymbols() {
   const host = $('#symbol-list');
@@ -1028,11 +1108,14 @@ for (const id of ['#symbol-list', '#issue-list', '#find-results']) {
 }
 
 // find navigator
+let findSequence = 0;
 async function runFind() {
+  const sequence = ++findSequence, root = S.root;
   const q = $('#find-input').value;
   const opts = { caseSensitive: $('#find-case').checked, word: $('#find-word').checked, regex: $('#find-regex').checked };
   if (!S.root || !q) { $('#find-results').innerHTML = ''; $('#find-summary').textContent = ''; return; }
-  let results = await api.search(S.root, q, opts);
+  let results = await api.search(root, q, opts);
+  if (sequence !== findSequence || S.root !== root || $('#find-input').value !== q) return;
   // unsaved buffers win over disk contents
   const dirty = [...S.docs.values()].filter(isDirty);
   if (dirty.length) {
@@ -1051,7 +1134,6 @@ async function runFind() {
   const total = results.reduce((a, r) => a + r.matches.length, 0);
   $('#find-summary').textContent = total ? `${total} result${total > 1 ? 's' : ''} in ${results.length} file${results.length > 1 ? 's' : ''}` : 'No results';
   $('#replace-all').disabled = !total;
-  $('#replace-all').disabled = !total;
   const out = [];
   for (const r of results) {
     out.push(`<div class="group-row"><span class="badge">${fileBadge(basename(r.file), 'file')}</span>${esc(basename(r.file))}<span class="count">${r.matches.length}</span></div>`);
@@ -1065,6 +1147,7 @@ async function runFind() {
   }
   $('#find-results').innerHTML = out.join('');
 }
+$('#find-input').addEventListener('input', debounce(runFind, 180));
 $('#find-input').addEventListener('keydown', e => { if (e.key === 'Enter') runFind(); });
 ['#find-case', '#find-word', '#find-regex'].forEach(id => $(id).addEventListener('change', runFind));
 
@@ -1210,8 +1293,7 @@ function applyDiagsToDoc(doc) {
   if (!monaco || doc.kind !== 'file') return;
   const n = norm(doc.path);
   const model = doc.model;
-  const live = typeof LSP !== 'undefined' && setting('liveIssues') !== false ? LSP.diags.get(n) : null;
-  const list = (live || S.diags.filter(d => d.file && norm(d.file) === n)).filter(d => d.severity !== 'note' && d.line > 0);
+  const list = allIssues().filter(d => d.file && norm(d.file) === n && d.severity !== 'note' && d.line > 0);
   const lines = model.getLineCount();
   monaco.editor.setModelMarkers(model, 'swiftc', list.map(d => {
     const line = Math.min(d.line, lines);
@@ -1297,11 +1379,20 @@ function noteIssueEdit(doc, e) {
   }
   doc.editLines = lines;
   doc.editAt = Date.now();
-  if (doc.issueItems && doc.issueItems.length) {
-    refreshIssueDecos(doc);
-    clearTimeout(doc.quietTimer);
-    doc.quietTimer = setTimeout(() => refreshIssueDecos(doc), ISSUE_QUIET_MS + 50);
-  }
+  discardFileIssues(doc);
+  clearTimeout(doc.quietTimer);
+  doc.quietTimer = setTimeout(() => refreshIssueDecos(doc), ISSUE_QUIET_MS + 50);
+}
+
+function discardFileIssues(doc) {
+  delete doc.buildVerified;
+  if (/\.swift$/i.test(doc.path)) S.sourceRevision++;
+  const file = norm(doc.path);
+  S.diags = S.diags.filter(d => !d.file || norm(d.file) !== file);
+  LSP.raw.delete(file);
+  LSP.diags.delete(file);
+  if (!doc.model.isDisposed()) applyDiagsToDoc(doc);
+  refreshIssueViews();
 }
 
 function clearDiagnostics() {
@@ -1391,13 +1482,19 @@ function onSimModel(model) {
 }
 api.on('sim:modelChanged', onSimModel);
 
+let runSequence = 0;
 async function runAction(action, extra = {}) {
   if (!S.root) { toast('Open a project first'); return; }
   if (licenseLocked()) { showLicenseSheet(S.license.status); return; }
+  const root = S.root, sequence = ++runSequence;
   if (S.building || S.running) await api.stop();
-  if (setting('saveBeforeRun') !== false) await saveAll();
+  if (root !== S.root || sequence !== runSequence) return;
+  if (setting('saveBeforeRun') !== false && !(await saveAll())) return;
+  if (root !== S.root || sequence !== runSequence) return;
   clearDiagnostics();
-  const report = { id: ++S.reportSeq, action, name: S.name, start: new Date(), log: [], ok: null };
+  const report = { id: ++S.reportSeq, action, preview: extra.preview, name: S.name, start: new Date(), log: [], ok: null };
+  report.sourceRevision = S.sourceRevision;
+  report.versions = new Map([...S.docs.values()].filter(d => d.kind === 'file' && !isDirty(d)).map(d => [norm(d.path), d.model.getVersionId()]));
   S.reports.unshift(report);
   S.currentReport = report;
   S.building = true;
@@ -1410,7 +1507,7 @@ async function runAction(action, extra = {}) {
   }
   // like Xcode's Debug scheme: Run launches under LLDB unless Edit Scheme ▸ Info ▸ Debug executable is off
   const debug = action === 'run' && !S.isPackage && !extra.noDebug;
-  api.build({ root: S.root, action, preview: extra.preview, debug, breakpoints: debug ? breakpointsForRun() : [] });
+  api.build({ reportId: report.id, root: S.root, action, preview: extra.preview, debug, breakpoints: debug ? breakpointsForRun() : [] });
 }
 
 async function previewAction() {
@@ -1433,6 +1530,7 @@ function finishBuildLog(r) {
 
 api.on('build:event', ev => {
   const r = S.currentReport;
+  if (ev.reportId != null && ev.reportId !== r?.id) return;
   switch (ev.type) {
     case 'toolchain-missing':
       S.building = false;
@@ -1456,7 +1554,9 @@ api.on('build:event', ev => {
       if (r) { r.log.push(ev.text); if (r.doc) appendLog(r.doc, ev.text); }
       break;
     case 'diag': {
-      const inProject = !!(ev.file && S.root && norm(ev.file).startsWith(norm(S.root)) && !norm(ev.file).includes('\\.build\\'));
+      const inProject = !!(ev.file && S.root && (norm(ev.file) === norm(S.root) || norm(ev.file).startsWith(norm(S.root) + '\\')) && !norm(ev.file).includes('\\.build\\'));
+      const doc = inProject && S.docs.get(docKey(ev.file));
+      if (doc && r?.versions.get(norm(ev.file)) !== doc.model.getVersionId()) break;
       if (ev.severity === 'note' && !inProject) break;
       S.diags.push({ ...ev, inProject, file: inProject ? ev.file : null });
       applyDiagnosticsSoon();
@@ -1465,6 +1565,12 @@ api.on('build:event', ev => {
     case 'build-end':
       S.building = false;
       if (r) { r.ok = ev.ok; r.log.push(ev.ok ? `\nBuild succeeded in ${(ev.ms / 1000).toFixed(1)} s` : '\nBuild failed'); finishBuildLog(r); }
+      if (ev.ok && r && !r.preview && r.sourceRevision === S.sourceRevision) for (const doc of S.docs.values()) {
+        if (doc.kind !== 'file' || isDirty(doc) || r?.versions.get(norm(doc.path)) !== doc.model.getVersionId()) continue;
+        doc.buildVerified = S.sourceRevision;
+        clearLiveDiagnostics(doc);
+      }
+      if (ev.ok && S.root && !LSP.active && !LSP.starting) lspStartProject(S.root);
       if (!ev.ok && !S.diags.length) S.diags.push({ severity: 'error', message: 'Build failed — see the build log in the Report navigator', inProject: false, line: 0 });
       applyDiagnostics();
       setStatus(ev.ok ? 'succeeded' : 'failed');
@@ -1518,9 +1624,13 @@ function appendLog(doc, text) {
 
 async function stopAction() {
   if (!(S.building || S.running)) return;
+  const sequence = ++runSequence;
   S.stopRequested = true;
   await api.stop();
-  if (S.building) { S.building = false; setStatus('stopped'); }
+  if (sequence !== runSequence) return;
+  S.building = false; S.running = false; S.stopRequested = false;
+  $('#dbg-process').textContent = '';
+  setStatus('stopped');
   updateRunButtons();
 }
 
@@ -2108,7 +2218,9 @@ const TEMPLATES = {
   ios: [
     { id: 'ios-app', name: 'App', icon: 'app', desc: 'This template provides a starting point for a SwiftUI app — the same files Xcode creates. It runs in the iPhone Simulator.' },
     { id: 'ios-sample', name: 'Tabbed App', icon: 'tabs', desc: 'A complete SwiftUI sample: TabView, NavigationStack, List with swipe-to-delete, Form, @Observable model, alerts and @AppStorage.' },
-    { id: 'x-doc', name: 'Document App', icon: 'empty', disabled: true },
+    { id: 'ios-api', name: 'App with API', icon: 'app', desc: 'Load a JSON feed with URLSession, async/await and Codable.' },
+    { id: 'ios-data', name: 'SwiftData App', icon: 'app', desc: 'Create, sort and delete notes with a persistent model container.' },
+    { id: 'ios-document', name: 'Document App', icon: 'app', desc: 'Open, edit and export a UTF-8 text document.' },
     { id: 'x-game', name: 'Game', icon: 'empty', disabled: true },
     { id: 'x-ar', name: 'Augmented Reality App', icon: 'empty', disabled: true },
     { id: 'x-playground', name: 'App Playground', icon: 'empty', disabled: true },
@@ -2614,6 +2726,7 @@ function menuTemplate(name) {
         { id: 'nav-bookmarks', label: 'Bookmarks', accel: 'CmdOrCtrl+2' },
         { id: 'nav-symbols', label: 'Symbols', accel: 'CmdOrCtrl+3' },
         { id: 'nav-find', label: 'Find', accel: 'CmdOrCtrl+4' },
+        { id: 'nav-source', label: 'Source Control', accel: 'CmdOrCtrl+6' },
         { id: 'nav-issues', label: 'Issues', accel: 'CmdOrCtrl+5' },
         { id: 'nav-debug', label: 'Debug', accel: 'CmdOrCtrl+7' },
         { id: 'nav-breakpoints', label: 'Breakpoints', accel: 'CmdOrCtrl+8' },
@@ -2826,6 +2939,7 @@ const COMMANDS = {
   'nav-bookmarks': () => showNav('bookmarks'),
   'nav-symbols': () => showNav('symbols'),
   'nav-find': () => showNav('find'),
+  'nav-source': () => showNav('source'),
   'nav-issues': () => showNav('issues'),
   'nav-debug': () => showNav('debug'),
   'nav-breakpoints': () => showNav('breakpoints'),

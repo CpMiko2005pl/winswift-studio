@@ -4,6 +4,9 @@
 const LSP = {
   active: false,          // server initialized for the open project
   starting: false,
+  session: 0,
+  revision: 0,
+  pullDiagnostics: false,
   root: null,
   opened: new Map(),      // uri -> { version, doc, timer }
   diags: new Map(),       // norm(path) -> live issues
@@ -26,11 +29,14 @@ const LSP_EXT_OVERRIDE = /cannot be overridden from extension|declared in extens
 function windowExtensionSpans(text) {
   const spans = [];
   const re = /\bextension\s+(?:UIWindow|UIResponder)\b[^{]*\{/g;
+  const mask = window.swiftSource.codeMask(text);
   const lineAt = k => text.slice(0, k).split('\n').length;
   let m;
   while ((m = re.exec(text))) {
+    if (!mask[m.index]) continue;
     let depth = 0, i = m.index + m[0].length - 1;
     for (; i < text.length; i++) {
+      if (!mask[i]) continue;
       if (text[i] === '{') depth++;
       else if (text[i] === '}' && --depth === 0) break;
     }
@@ -40,8 +46,10 @@ function windowExtensionSpans(text) {
   return spans;
 }
 
-function windowsOnlyIssue(d, spans) {
-  if (LSP_OBJC.test(d.message)) return true;
+function windowsOnlyIssue(d, spans, lines) {
+  if (LSP_OBJC.test(d.message) || /#selector.*(?:can only be used|Objective-C runtime)/i.test(d.message)) {
+    return /@objc(?:Members)?\b|#selector\s*\(/.test(lines[d.range.start.line] || '');
+  }
   if (!LSP_EXT_OVERRIDE.test(d.message)) return false;
   const line = d.range.start.line + 1;
   return spans.some(([a, b]) => line >= a && line <= b);
@@ -68,15 +76,18 @@ function docForModel(model) {
 // ------------------------------------------------------------------ lifecycle
 
 async function lspStartProject(root) {
-  await lspStopProject();
-  if (!root) return;
+  const stopping = lspStopProject();
+  const session = LSP.session;
+  await stopping;
+  if (!root || session !== LSP.session) return;
   LSP.root = root;
   LSP.starting = true;
   renderBackgroundActivity();
   const r = await api.lspStart(root);
-  if (LSP.root !== root) return;
+  if (session !== LSP.session) return;
   LSP.starting = false;
   LSP.active = !!(r && r.ok);
+  LSP.pullDiagnostics = LSP.pullDiagnostics || !!(r?.pullDiagnostics || r?.capabilities?.diagnosticProvider);
   if (editor) editor.updateOptions({ wordBasedSuggestions: LSP.active ? 'off' : 'matchingDocuments' });
   renderBackgroundActivity();
   if (!LSP.active) return;
@@ -87,6 +98,8 @@ async function lspStartProject(root) {
 }
 
 async function lspStopProject() {
+  LSP.session++;
+  LSP.pullDiagnostics = false;
   const was = LSP.active || LSP.starting;
   LSP.active = false;
   LSP.starting = false;
@@ -96,20 +109,27 @@ async function lspStopProject() {
   LSP.diags.clear();
   LSP.raw.clear();
   LSP.progress.clear();
-  if (was) await api.lspStop();
+  if (was) { applyDiagnostics(); await api.lspStop(); }
   renderBackgroundActivity();
 }
 
 function lspWants(doc) {
-  return LSP.active && doc && doc.kind === 'file' && /\.swift$/i.test(doc.path) && LSP.root && norm(doc.path).startsWith(norm(LSP.root));
+  return LSP.active && doc && doc.kind === 'file' && /\.swift$/i.test(doc.path) && LSP.root && norm(doc.path).startsWith(norm(LSP.root).replace(/\\$/, '') + '\\');
+}
+
+function sourceKitText(doc) {
+  const text = doc.model.getValue();
+  return text.includes('@Model') ? window.swiftSource.rewriteModels(text) : text;
 }
 
 function lspOpen(doc) {
   if (!lspWants(doc)) return;
   const uri = fileUri(doc.path);
   if (LSP.opened.has(uri)) return;
-  LSP.opened.set(uri, { version: 1, doc, timer: null, dirty: false });
-  api.lspNotify('textDocument/didOpen', { textDocument: { uri, languageId: 'swift', version: 1, text: doc.model.getValue() } });
+  const version = ++LSP.revision;
+  LSP.opened.set(uri, { version, doc, timer: null, dirty: false });
+  api.lspNotify('textDocument/didOpen', { textDocument: { uri, languageId: 'swift', version, text: sourceKitText(doc) } });
+  requestLiveDiagnostics(doc);
 }
 
 function lspClose(doc) {
@@ -119,6 +139,7 @@ function lspClose(doc) {
   if (!o) return;
   clearTimeout(o.timer);
   LSP.opened.delete(uri);
+  clearLiveDiagnostics(doc);
   if (LSP.active) api.lspNotify('textDocument/didClose', { textDocument: { uri } });
 }
 
@@ -126,7 +147,8 @@ function lspClose(doc) {
 function lspChanged(doc) {
   if (!lspWants(doc)) return;
   const uri = fileUri(doc.path);
-  if (!LSP.opened.has(uri)) { lspOpen(doc); return; }
+  clearLiveDiagnostics(doc);
+  if (!LSP.opened.has(uri)) { if (S.tabs.includes(doc.key)) lspOpen(doc); return; }
   const o = LSP.opened.get(uri);
   o.dirty = true;
   clearTimeout(o.timer);
@@ -141,8 +163,9 @@ function lspFlush(doc) {
   clearTimeout(o.timer);
   if (!o.dirty) return;
   o.dirty = false;
-  o.version++;
-  api.lspNotify('textDocument/didChange', { textDocument: { uri, version: o.version }, contentChanges: [{ text: doc.model.getValue() }] });
+  o.version = ++LSP.revision;
+  api.lspNotify('textDocument/didChange', { textDocument: { uri, version: o.version }, contentChanges: [{ text: sourceKitText(doc) }] });
+  requestLiveDiagnostics(doc);
 }
 
 function lspSaved(doc) {
@@ -171,22 +194,58 @@ async function lspCall(method, params) {
 
 api.on('lsp:notification', msg => {
   if (!msg) return;
+  if (msg.method === 'swiftcode/diagnosticsRegistered' || msg.method === 'swiftcode/refreshDiagnostics') {
+    if (msg.method === 'swiftcode/diagnosticsRegistered') LSP.pullDiagnostics = true;
+    for (const { doc, dirty } of LSP.opened.values()) if (!dirty) requestLiveDiagnostics(doc);
+    return;
+  }
   if (msg.method === 'textDocument/publishDiagnostics') onLspDiagnostics(msg.params);
   else if (msg.method === '$/progress') onLspProgress(msg.params);
   else if (msg.method === 'swiftcode/status') {
-    if (msg.params.state === 'stopped' && LSP.active) { LSP.active = false; renderBackgroundActivity(); }
+    if (msg.params.state === 'stopped' && LSP.active) { lspStopProject(); }
   } else if (msg.method === 'swiftcode/applyEdit') applyLspWorkspaceEdit(msg.params.edit);
 });
+
+function clearLiveDiagnostics(doc) {
+  const key = norm(doc.path);
+  LSP.raw.delete(key);
+  if (LSP.diags.delete(key) && !doc.model.isDisposed()) {
+    applyDiagsToDoc(doc);
+    refreshIssueViews();
+  }
+}
+
+async function requestLiveDiagnostics(doc) {
+  if (!LSP.pullDiagnostics) return;
+  const uri = fileUri(doc.path);
+  const entry = LSP.opened.get(uri);
+  const version = entry.version;
+  const request = entry.request = (entry.request || 0) + 1;
+  const result = await lspCall('textDocument/diagnostic', { textDocument: { uri } });
+  if (result?.kind === 'full' && entry.request === request && LSP.opened.get(uri) === entry) {
+    onLspDiagnostics({ uri, version, diagnostics: result.items });
+  }
+}
 
 function onLspDiagnostics(p) {
   const file = uriToPath(p.uri);
   if (!file) return;
   const key = norm(file);
   const open = S.docs.get(docKey(file));
-  const spans = open && open.model && !open.model.isDisposed() ? windowExtensionSpans(open.model.getValue()) : [];
-  const raw = (p.diagnostics || []).filter(d => !LSP_NOISE.some(re => re.test(d.message)) && !windowsOnlyIssue(d, spans));
-  LSP.raw.set(key, raw);
-  LSP.diags.set(key, raw.map(d => ({
+  if (!lspWants(open) || open.model.isDisposed()) return;
+  const entry = LSP.opened.get(fileUri(open.path));
+  if (!entry || entry.dirty || (p.version != null && p.version !== entry.version)) return;
+  if (LSP.pullDiagnostics && p.version == null) return;
+  const source = open.model.getValue();
+  const lines = source.split('\n');
+  const spans = source.includes('extension') ? windowExtensionSpans(source) : [];
+  const previews = source.includes('#Preview') ? window.swiftSource.stripPreviews(source).previews : [];
+  const raw = (p.diagnostics || []).filter(d => !LSP_NOISE.some(re => re.test(d.message)) && !windowsOnlyIssue(d, spans, lines)
+    && !previews.some(p => d.range.start.line + 1 >= p.line && d.range.end.line + 1 <= p.endLine));
+  const current = open.buildVerified === S.sourceRevision && open.buildVerified != null
+    ? raw.filter(d => d.severity !== 1) : raw;
+  LSP.raw.set(key, current);
+  LSP.diags.set(key, current.map(d => ({
     file, line: d.range.start.line + 1, col: d.range.start.character + 1,
     endLine: d.range.end.line + 1, endCol: d.range.end.character + 1,
     severity: LSP_SEVERITY[d.severity] || 'error', message: d.message, live: true, inProject: true,

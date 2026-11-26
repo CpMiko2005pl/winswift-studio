@@ -231,6 +231,8 @@ public final class _Graph: @unchecked Sendable {
     var numSetters: [String: @MainActor (Double) -> Void] = [:]
     var indexSetters: [String: @MainActor (Int) -> Void] = [:]
     var gestures: [String: _GesturePart] = [:]
+    var disappeared: [String: @MainActor () -> Void] = [:]
+    var tasks: [String: Task<Void, Never>] = [:]
     var appeared: Set<String> = []
     var seenThisRender: Set<String> = []
     var pendingAfterRender: [@MainActor () -> Void] = []
@@ -243,8 +245,11 @@ public final class _Graph: @unchecked Sendable {
     }
 
     func removeStorage(prefix: String) {
-        for k in storage.keys where k.hasPrefix(prefix) { storage.removeValue(forKey: k) }
-        appeared = appeared.filter { !$0.hasPrefix(prefix) }
+        func belongs(_ key: String) -> Bool {
+            key == prefix || key.hasPrefix(prefix + "/") || key.hasPrefix(prefix + "#") || key.hasPrefix(prefix + "~")
+        }
+        for key in storage.keys where belongs(key) { storage.removeValue(forKey: key) }
+        appeared = appeared.filter { !belongs($0) }
     }
 }
 
@@ -256,22 +261,32 @@ public final class _Runtime: @unchecked Sendable {
     let graph = _Graph()
     var root: (@MainActor (_Ctx) -> [_Node])?
     var lastSent = ""
-    var renderScheduled = false
+    private let scheduleLock = NSLock()
+    private var renderScheduled = false
+    private var nextAnimation: Animation?
+    func animateNextUpdate(_ animation: Animation) {
+        scheduleLock.lock(); nextAnimation = animation; scheduleLock.unlock()
+        Self.setNeedsRender()
+    }
     var rendering = false
 
     /// Called by @State / @Published / bindings whenever data changes.
     public static func setNeedsRender() {
         let rt = shared
-        if rt.renderScheduled { return }
+        rt.scheduleLock.lock()
+        let pending = rt.renderScheduled
         rt.renderScheduled = true
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { rt.render() }
-        }
+        rt.scheduleLock.unlock()
+        if !pending { DispatchQueue.main.async { MainActor.assumeIsolated { rt.render() } } }
     }
 
     @MainActor
     func render() {
+        scheduleLock.lock()
         renderScheduled = false
+        let animation = nextAnimation
+        nextAnimation = nil
+        scheduleLock.unlock()
         guard let root, !rendering else { return }
         rendering = true
         defer { rendering = false }
@@ -283,6 +298,14 @@ public final class _Runtime: @unchecked Sendable {
             graph.seenThisRender = []
             let ctx = _Ctx(path: "r", graph: graph, env: EnvironmentValues())
             let nodes = root(ctx)
+            graph.appeared.formIntersection(graph.seenThisRender)
+            for key in graph.disappeared.keys where !graph.seenThisRender.contains(key) {
+                if let action = graph.disappeared.removeValue(forKey: key) { graph.pendingAfterRender.append(action) }
+            }
+            for key in graph.tasks.keys where !graph.seenThisRender.contains(key) {
+                graph.tasks.removeValue(forKey: key)?.cancel()
+                graph.storage.removeValue(forKey: key)
+            }
             // onAppear / onChange handlers run after the tree is built, then we render again if needed
             let pending = graph.pendingAfterRender
             graph.pendingAfterRender = []
@@ -291,6 +314,11 @@ public final class _Runtime: @unchecked Sendable {
             if pending.isEmpty || passes >= 4 {
                 if out != lastSent {
                     lastSent = out
+                    if let animation, let first = nodes.first {
+                        first.p["transaction"] = .a(animation.json)
+                        out = "\u{1E}UI "
+                        _J.nodes(nodes).write(into: &out)
+                    }
                     _emit(out)
                 }
                 for p in pending { p() }
@@ -299,7 +327,7 @@ public final class _Runtime: @unchecked Sendable {
             for p in pending { p() }
         } while true
         // handlers above may have changed state without a render in flight
-        if renderScheduled == false, graph.pendingAfterRender.isEmpty == false { _Runtime.setNeedsRender() }
+        if !graph.pendingAfterRender.isEmpty { _Runtime.setNeedsRender() }
     }
 
     @MainActor
@@ -319,6 +347,10 @@ public final class _Runtime: @unchecked Sendable {
         case "index":
             if let v = obj["v"] as? Int { graph.indexSetters[id]?(v) }
             else if let v = obj["v"] as? Double { graph.indexSetters[id]?(Int(v)) }
+        case "geometry":
+            if let v = obj["v"] as? [Double], v.count == 2, v.allSatisfy({ $0.isFinite && $0 > 0 }) {
+                graph.box(id + "~size") { CGSize.zero }.value = CGSize(width: v[0], height: v[1])
+            }
         case "refresh": lastSent = ""
         case "scheme": _currentScheme = (obj["v"] as? String) == "dark" ? .dark : .light
         case "gesture": if let v = obj["v"] as? [String: Any] { _dispatchGesture(graph, id, v) }

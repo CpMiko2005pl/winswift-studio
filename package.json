@@ -1,7 +1,7 @@
 {
   "name": "winswift-studio",
   "productName": "WinSwift Studio",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Build iPhone apps in Swift and SwiftUI on Windows 10 and 11 - an Xcode-style IDE with an iPhone simulator, live previews and a debugger",
   "main": "main.js",
   "author": "BiNoX",
@@ -52,6 +52,7 @@
       "preload.js",
       "sim-preload.js",
       "buildtools.js",
+      "source-control.js",
       "activation.js",
       "updater.js",
       "package.json",

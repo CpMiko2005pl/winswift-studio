@@ -23,6 +23,18 @@ public struct _ModifiedView<Content: View>: View, _PrimitiveView {
     }
 }
 
+private struct _IdentifiedView<Content: View, ID: Hashable>: View, _PrimitiveView {
+    let content: Content, id: ID
+    func _render(_ ctx: _Ctx) -> [_Node] {
+        let identity = ctx.graph.box(ctx.path + "~identity") { (id, 0) }
+        if identity.value.0 != id {
+            ctx.graph.removeStorage(prefix: ctx.path + "/id" + String(identity.value.1))
+            identity.value = (id, identity.value.1 + 1)
+        }
+        return _resolve(content, ctx.child("id" + String(identity.value.1)))
+    }
+}
+
 struct _TagView<Content: View>: View, _PrimitiveView {
     let content: Content, tag: AnyHashable
     func _render(_ ctx: _Ctx) -> [_Node] {
@@ -245,17 +257,28 @@ extension View {
             return nil
         }
     }
-    public func onDisappear(perform action: (@MainActor () -> Void)? = nil) -> some View { self }
+    public func onDisappear(perform action: (@MainActor () -> Void)? = nil) -> some View {
+        _ModifiedView(content: self, key: "onDisappear") { ctx in
+            ctx.graph.seenThisRender.insert(ctx.path)
+            ctx.graph.disappeared[ctx.path] = action
+            return nil
+        }
+    }
 
     public func task(priority: TaskPriority = .userInitiated, _ action: @escaping @MainActor @Sendable () async -> Void) -> some View {
-        onAppear { Task { @MainActor in await action() } }
+        task(id: true, priority: priority, action)
     }
     public func task<T: Equatable>(id value: T, priority: TaskPriority = .userInitiated, _ action: @escaping @MainActor @Sendable () async -> Void) -> some View {
-        _ModifiedView(content: self, key: "taskId") { ctx in
-            let box = ctx.graph.box(ctx.path + "~taskid") { Optional<T>.none }
-            if box.value != value {
+        _ModifiedView(content: self, key: "task") { ctx in
+            let key = ctx.path + "~task", graph = ctx.graph
+            graph.seenThisRender.insert(key)
+            let box = graph.box(key) { value }
+            if graph.tasks[key] == nil || box.value != value {
+                graph.tasks[key]?.cancel()
                 box.value = value
-                ctx.graph.pendingAfterRender.append { Task { @MainActor in await action() } }
+                graph.tasks[key] = Task(priority: priority) { @MainActor in
+                    if !Task.isCancelled { await action() }
+                }
             }
             return nil
         }
@@ -294,7 +317,12 @@ extension View {
             return ["id": .s(ctx.path + "~submit")]
         }
     }
-    public func refreshable(action: @escaping @Sendable () async -> Void) -> some View { self }
+    public func refreshable(action: @escaping @Sendable () async -> Void) -> some View {
+        _ModifiedView(content: self, key: "refreshable") { ctx in
+            ctx.action(ctx.path) { Task { await action() } }
+            return ["id": .s(ctx.path)]
+        }
+    }
     public func onOpenURL(perform action: @escaping (URL) -> Void) -> some View { self }
     public func onMove(perform action: ((IndexSet, Int) -> Void)?) -> some View { self }
     public func swipeActions<T: View>(edge: HorizontalEdge = .trailing, allowsFullSwipe: Bool = true, @ViewBuilder content: () -> T) -> some View {
@@ -311,8 +339,26 @@ extension View {
     }
     public func allowsHitTesting(_ enabled: Bool) -> some View { _mod("hitTesting", ["v": .b(enabled)]) }
 
-    public func focused(_ binding: FocusState<Bool>.Binding) -> some View { self }
-    public func focused<V: Hashable>(_ binding: FocusState<V>.Binding, equals value: V) -> some View { self }
+    public func contextMenu<M: View, P: View>(@ViewBuilder menuItems: () -> M, @ViewBuilder preview: () -> P) -> some View {
+        let menu = AnyView(menuItems()), preview = AnyView(preview())
+        return _ModifiedView(content: self, key: "contextMenu") { ctx in
+            ["v": .nodes(menu._render(ctx.child("menu"))), "preview": .nodes(preview._render(ctx.child("preview")))]
+        }
+    }
+    public func focused(_ binding: FocusState<Bool>.Binding) -> some View {
+        _focus(binding)
+    }
+    public func focused<V: Hashable>(_ binding: Binding<V?>, equals value: V) -> some View {
+        _focus(Binding(get: { binding.wrappedValue == value }, set: { focused in
+            if focused { binding.wrappedValue = value } else if binding.wrappedValue == value { binding.wrappedValue = nil }
+        }))
+    }
+    private func _focus(_ binding: Binding<Bool>) -> some View {
+        _ModifiedView(content: self, key: "focused") { ctx in
+            ctx.graph.boolSetters[ctx.path] = { binding.wrappedValue = $0 }
+            return ["id": .s(ctx.path), "active": .b(binding.wrappedValue)]
+        }
+    }
     public func keyboardType(_ type: UIKeyboardType) -> some View {
         let mode: String
         switch type {
@@ -334,14 +380,17 @@ extension View {
     public func scrollDismissesKeyboard(_ m: ScrollDismissesKeyboardMode) -> some View { self }
     public func scrollIndicators(_ v: ScrollIndicatorVisibility, axes: Axis.Set = [.vertical, .horizontal]) -> some View { self }
     public func scrollDisabled(_ d: Bool) -> some View { self }
-    public func scrollTargetBehavior(_ b: Any) -> some View { self }
+    public func scrollTargetBehavior(_ b: ScrollTargetBehavior) -> some View { _mod("scrollTarget", ["v": .s(b.value)]) }
+    public func scrollTargetLayout(isEnabled: Bool = true) -> some View { _mod("scrollTargets", ["enabled": .b(isEnabled)]) }
     public func scrollContentBackground(_ v: Visibility) -> some View { _mod("scrollBg", ["v": .s(v == .hidden ? "hidden" : "visible")]) }
 
-    public func animation<V: Equatable>(_ a: Animation?, value: V) -> some View { self }
-    public func animation(_ a: Animation?) -> some View { self }
-    public func transition(_ t: AnyTransition) -> some View { self }
-    public func matchedGeometryEffect<ID: Hashable>(id: ID, in namespace: Namespace.ID, properties: Int = 0, anchor: UnitPoint = .center, isSource: Bool = true) -> some View { self }
-    public func id<ID: Hashable>(_ id: ID) -> some View { self }
+    public func animation<V: Equatable>(_ a: Animation?, value: V) -> some View {
+        _mod("animation", ["params": .a(a?.json ?? []), "value": .s(String(reflecting: value))])
+    }
+    public func animation(_ a: Animation?) -> some View { _mod("animation", ["params": .a(a?.json ?? [])]) }
+    public func transition(_ t: AnyTransition) -> some View { _mod("transition", ["kind": .s(t.kind)]) }
+    public func matchedGeometryEffect<ID: Hashable>(id: ID, in namespace: Namespace.ID, properties: Int = 0, anchor: UnitPoint = .center, isSource: Bool = true) -> some View { _mod("matched", ["id": .s("\(namespace)/\(id)")]) }
+    public func id<ID: Hashable>(_ id: ID) -> some View { _IdentifiedView(content: self, id: id) }
     public func tag<V: Hashable>(_ tag: V) -> some View { _TagView(content: self, tag: AnyHashable(tag)) }
     public func tag<V: Hashable>(_ tag: V, includeOptional: Bool) -> some View { _TagView(content: self, tag: AnyHashable(tag)) }
 
@@ -354,7 +403,9 @@ extension View {
     public func accessibilityHidden(_ h: Bool) -> some View { self }
     public func accessibilityElement(children: AccessibilityChildBehavior = .ignore) -> some View { self }
     public func accessibilityAddTraits(_ t: AccessibilityTraits) -> some View { self }
-    public func sensoryFeedback<T: Equatable>(_ f: SensoryFeedback, trigger: T) -> some View { self }
+    public func sensoryFeedback<T: Equatable>(_ f: SensoryFeedback, trigger: T) -> some View {
+        onChange(of: trigger) { _ in _Runtime.request("feedback", ["kind": f.kind]) }
+    }
     public func presentationDetents(_ d: Set<PresentationDetent>) -> some View { self }
     public func presentationDragIndicator(_ v: Visibility) -> some View { self }
     public func presentationCornerRadius(_ r: CGFloat?) -> some View { self }
@@ -399,7 +450,11 @@ public enum ScrollDismissesKeyboardMode: Sendable { case automatic, immediately,
 public enum ScrollIndicatorVisibility: Sendable { case automatic, visible, hidden, never }
 public enum AccessibilityChildBehavior: Sendable { case ignore, contain, combine }
 public struct AccessibilityTraits: OptionSet, Sendable { public let rawValue: Int; public init(rawValue: Int) { self.rawValue = rawValue }; public static let isButton = AccessibilityTraits(rawValue: 1), isHeader = AccessibilityTraits(rawValue: 2), isSelected = AccessibilityTraits(rawValue: 4) }
-public struct SensoryFeedback: Sendable { public static let success = SensoryFeedback(), warning = SensoryFeedback(), error = SensoryFeedback(), selection = SensoryFeedback(), increase = SensoryFeedback(), decrease = SensoryFeedback(), impact = SensoryFeedback() }
+public struct SensoryFeedback: Sendable {
+    let kind: String
+    public static let success = Self(kind: "Success"), warning = Self(kind: "Warning"), error = Self(kind: "Error")
+    public static let selection = Self(kind: "Selection"), increase = Self(kind: "Increase"), decrease = Self(kind: "Decrease"), impact = Self(kind: "Impact")
+}
 public struct PresentationDetent: Hashable, Sendable {
     let v: Double
     public static let medium = PresentationDetent(v: 0.5), large = PresentationDetent(v: 1)
@@ -418,8 +473,9 @@ extension FocusState { public typealias Binding = SwiftUI.Binding<Value> }
 public struct Namespace: _DynamicProperty {
     public typealias ID = Int
     public init() {}
-    public var wrappedValue: Int { 0 }
-    public func _install(key: String, ctx: _Ctx) {}
+    private let location = _Box(0)
+    public var wrappedValue: Int { location.value }
+    public func _install(key: String, ctx: _Ctx) { location.value = (ctx.path + "~" + key).hashValue }
 }
 
 // MARK: - Styles

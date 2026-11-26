@@ -489,8 +489,9 @@ public struct GeometryReader<Content: View>: View, _PrimitiveView {
     let content: (GeometryProxy) -> Content
     public init(@ViewBuilder content: @escaping (GeometryProxy) -> Content) { self.content = content }
     public func _render(_ ctx: _Ctx) -> [_Node] {
-        // the simulated device's screen minus status bar, navigation bar and home indicator
-        [_Node("zstack", ctx.path, ["align": Alignment.topLeading.json, "fill": .b(true)], _resolve(content(GeometryProxy(size: CGSize(width: _screenSize.width, height: _screenSize.height - 152))), ctx))]
+        let size = ctx.graph.box(ctx.path + "~size") { CGSize(width: _screenSize.width, height: _screenSize.height - 152) }.value
+        return [_Node("zstack", ctx.path, ["align": Alignment.topLeading.json, "fill": .b(true), "measure": .b(true),
+            "w": .num(size.width), "h": .num(size.height)], _resolve(content(GeometryProxy(size: size)), ctx.child("geometry")))]
     }
 }
 
@@ -569,7 +570,10 @@ func _editModeBinding(_ ctx: _Ctx) -> Binding<EditMode> {
 public struct Link<Label: View>: View, _PrimitiveView {
     let label: Label, url: URL
     public init(destination: URL, @ViewBuilder label: () -> Label) { self.url = destination; self.label = label() }
-    public func _render(_ ctx: _Ctx) -> [_Node] { [_Node("button", ctx.path, ["link": .s(url.absoluteString)], _resolve(label, ctx.child("l")))] }
+    public func _render(_ ctx: _Ctx) -> [_Node] {
+        ctx.action(ctx.path) { ctx.env.openURL(url) }
+        return [_Node("button", ctx.path, [:], _resolve(label, ctx.child("l")))]
+    }
 }
 extension Link where Label == Text {
     public init(_ titleKey: LocalizedStringKey, destination: URL) { self.init(destination: destination) { Text(titleKey) } }
@@ -578,9 +582,18 @@ extension Link where Label == Text {
 }
 
 public struct ShareLink: View, _PrimitiveView {
-    public init<T>(item: T, subject: Text? = nil, message: Text? = nil) {}
-    public init<T>(_ title: String, item: T) {}
-    public func _render(_ ctx: _Ctx) -> [_Node] { [_Node("symbol", ctx.path, ["name": .s("square.and.arrow.up"), "resizable": .b(false)])] }
+    private let item: String, label: AnyView
+    public init<T>(item: T, subject: Text? = nil, message: Text? = nil) {
+        self.init(item: item, subject: subject, message: message) { Label("Share", systemImage: "square.and.arrow.up") }
+    }
+    public init<T>(_ title: String, item: T) { self.init(item: item) { Text(title) } }
+    public init<T, L: View>(item: T, subject: Text? = nil, message: Text? = nil, @ViewBuilder label: () -> L) {
+        self.item = String(describing: item); self.label = AnyView(label())
+    }
+    public func _render(_ ctx: _Ctx) -> [_Node] {
+        ctx.action(ctx.path) { _Runtime.request("share", ["text": item]) }
+        return [_Node("button", ctx.path, [:], _resolve(label, ctx.child("label")))]
+    }
 }
 
 // MARK: - Text input
@@ -901,13 +914,24 @@ extension ForEach: View, _PrimitiveView where Content: View {
 
     public func _render(_ ctx: _Ctx) -> [_Node] {
         var out: [_Node] = []
+        let identities = ctx.graph.box(ctx.path + "~rowIDs") { [ID: Int]() }
+        let sequence = ctx.graph.box(ctx.path + "~rowSequence") { 0 }
+        var live = Set<ID>()
         for (i, element) in data.enumerated() {
-            let nodes = _resolve(content(element), ctx.child("[\(idFor(element))]"))
+            let id = idFor(element)
+            live.insert(id)
+            if identities.value[id] == nil { sequence.value += 1; identities.value[id] = sequence.value }
+            let row = ctx.child("row" + String(identities.value[id]!))
+            let nodes = _resolve(content(element), row)
             if let del = onDeleteAction {
                 ctx.action(ctx.path + "~del\(i)") { del(IndexSet(integer: i)); _Runtime.setNeedsRender() }
                 for n in nodes { n.m.append(["k": .s("deletable"), "id": .s(ctx.path + "~del\(i)")]) }
             }
             out += nodes
+        }
+        for (id, index) in identities.value where !live.contains(id) {
+            ctx.graph.removeStorage(prefix: ctx.path + "/row" + String(index))
+            identities.value.removeValue(forKey: id)
         }
         return out
     }

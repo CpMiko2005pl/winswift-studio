@@ -51,7 +51,7 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
 
 - Nowy projekt iOS ma prawdziwy **`Nazwa.xcodeproj`** (format Xcode 16, folder synchronizowany) — ten sam folder z gita otwiera się w Xcode na Macu i w WinSwift Studio na Windows. Do tego `.gitignore`, a pliki z kompilacji (`.build/`) nigdy nie trafiają do repozytorium.
 - Projekt z Maca: WinSwift buduje tylko target aplikacji (foldery testów `…Tests` / `…UITests` są pomijane), a **nowy plik, zmiana nazwy i usunięcie** są zapisywane w `project.pbxproj` tak, jak zrobiłby to Xcode (małe, czytelne zmiany w git diff). Bundle ID, wersja, nazwa i opisy uprawnień są wspólne dla obu programów.
-- Starszy projekt z WinSwift: *File ▸ Create Xcode Project (.xcodeproj)…*
+- **Stare projekty naprawiają się same:** przy otwarciu WinSwift raz pyta i może dodać brakujący `.xcodeproj`, dopisać do projektu Xcode pliki dodane starszą wersją i usunąć z gita wrzucone wcześniej pliki z kompilacji (zostają na dysku). Ręcznie: *File ▸ Create Xcode Project (.xcodeproj)…*
 
 ### Nowości w 1.6.0
 

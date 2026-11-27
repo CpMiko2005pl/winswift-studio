@@ -70,6 +70,8 @@ public struct NavigationStack<Root: View>: View, _PrimitiveView {
             }
             _Runtime.setNeedsRender()
         })
+        nav.depth = { entries().count }
+        nav.popTo = { popTo($0) }
 
         // every screen has its own edit mode, shared by its EditButton and List
         func screenEditMode(_ key: String) -> Binding<EditMode> {
@@ -244,12 +246,27 @@ extension View {
     public func navigationDestination<C: View>(isPresented: Binding<Bool>, @ViewBuilder destination: () -> C) -> some View {
         let dest = AnyView(destination())
         return _ModifiedView(content: self, key: "navigationDestinationPresented") { ctx in
-            let pushed = ctx.graph.box(ctx.path + "#navpushed") { false }
-            if isPresented.wrappedValue && !pushed.value, let nav = ctx.nav {
-                pushed.value = true
-                ctx.graph.pendingAfterRender.append { nav.push(.view(dest, title: "")) }
-            } else if !isPresented.wrappedValue {
-                pushed.value = false
+            guard let nav = ctx.nav else { return nil }
+            // stack depth of the screen this modifier pushed: 0 = not shown, -1 = push scheduled
+            let shown = ctx.graph.box(ctx.path + "#navshown") { 0 }
+            let presented = isPresented.wrappedValue
+            if shown.value > 0 && nav.depth() < shown.value {
+                // closed by Back, a swipe or dismiss(): like iOS, the binding turns false again,
+                // so setting it to true later pushes the screen once more
+                shown.value = 0
+                if presented { ctx.graph.pendingAfterRender.append { isPresented.wrappedValue = false } }
+            } else if presented && shown.value == 0 {
+                shown.value = -1
+                ctx.graph.pendingAfterRender.append {
+                    guard isPresented.wrappedValue else { shown.value = 0; return }
+                    nav.push(.view(dest, title: ""))
+                    shown.value = nav.depth()
+                }
+            } else if !presented && shown.value > 0 {
+                // the app set the binding to false: close the screen (and anything above it), like iOS
+                let depth = shown.value
+                shown.value = 0
+                ctx.graph.pendingAfterRender.append { nav.popTo(depth - 1) }
             }
             return nil
         }

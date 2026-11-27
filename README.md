@@ -47,6 +47,10 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
 | **Debugger LLDB** — breakpointy na marginesie, *Continue / Step Over / Into / Out* (F6/F7/F8), zmienne, stos wywołań, konsola `(lldb)` z `po` i `p`, podgląd wartości po najechaniu. | <img src="docs/screenshots/debugger.png" width="480" alt="Debugger"> |
 | <img src="docs/screenshots/library.png" width="480" alt="Library"> | **Jak w Xcode** — Canvas z `#Preview`, podpowiedzi i błędy na żywo (SourceKit-LSP), Quick Help, Rename, Code Actions, Open Quickly, Find &amp; Replace w projekcie, Library (Views, Modifiers, Snippets, SF Symbols, Colors, Images), Edit Scheme, nawigatory, motyw jasny i ciemny, własne skróty klawiszowe. |
 
+### Poprawka w 1.6.2 — powrót z ekranu jak na iPhonie
+
+- `navigationDestination(isPresented:)`: przycisk *Wstecz*, przesunięcie palcem i `dismiss()` ustawiają zmienną z powrotem na `false`, tak jak w iOS. Wcześniej zostawała `true`, więc ponowne `showDetail = true` (np. drugie „Losuj”) nie otwierało ekranu aż do restartu aplikacji. Działa też odwrotnie: ustawienie zmiennej na `false` w kodzie zamyka ekran. To samo dotyczy `navigationDestination(item:)` — po powrocie `item` staje się `nil`.
+
 ### Nowości w 1.6.1 — projekt jak z Xcode (praca w zespole przez git)
 
 - Nowy projekt iOS ma prawdziwy **`Nazwa.xcodeproj`** (format Xcode 16, folder synchronizowany) — ten sam folder z gita otwiera się w Xcode na Macu i w WinSwift Studio na Windows. Do tego `.gitignore`, a pliki z kompilacji (`.build/`) nigdy nie trafiają do repozytorium.

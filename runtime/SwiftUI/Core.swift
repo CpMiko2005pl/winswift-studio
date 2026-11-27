@@ -162,6 +162,10 @@ public protocol _DynamicProperty {
 public final class _NavContext {
     var destinations: [ObjectIdentifier: (Any) -> AnyView] = [:]
     let push: (_NavEntry) -> Void
+    /// how many screens sit above the root right now
+    var depth: () -> Int = { 0 }
+    /// keeps this many screens above the root, closing the rest
+    var popTo: (Int) -> Void = { _ in }
     init(push: @escaping (_NavEntry) -> Void) { self.push = push }
 }
 

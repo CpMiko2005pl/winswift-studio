@@ -14,7 +14,7 @@ async function run() {
   const { version, env } = await prepare();
   const directory = fs.mkdtempSync(path.join(base, 'Próby '));
   const apps = {};
-  for (const [name, template] of Object.entries({ Gallery: null, Filtered: null, Identity: null, Notes: 'ios-data', Posts: 'ios-api', Document: 'ios-document', Tabs: 'ios-sample', Network: null })) {
+  for (const [name, template] of Object.entries({ Gallery: null, Filtered: null, Identity: null, Notes: 'ios-data', Posts: 'ios-api', Document: 'ios-document', Tabs: 'ios-sample', Network: null, NavBack: null })) {
     const root = path.join(directory, name);
     fs.mkdirSync(root);
     if (template) await context.createIOSProject(root, name, 'test', template);
@@ -67,6 +67,20 @@ async function run() {
     else if (identityStep === 1) { assert.deepEqual(rows, ['Row 1 = 1', 'Row 2 = 0']); identityStep++; tap('Reverse'); }
     else if (identityStep === 2) { assert.deepEqual(rows, ['Row 2 = 0', 'Row 1 = 1']); identityStep++; tap('Reset'); }
     else { assert.deepEqual(rows, ['Row 2 = 0', 'Row 1 = 0']); return true; }
+  });
+  // Draw → Back → Draw must open the screen again (Back turns the binding false), and so must Draw after Close
+  let navStep = 0;
+  await render('NavBack', (list, send) => {
+    const nav = list.find(n => n.t === 'nav');
+    const screens = nav.c.length;
+    const has = s => list.some(n => n.t === 'text' && textOf(n) === s);
+    const tap = label => send({ k: 'tap', id: list.find(n => n.t === 'button' && textOf(n) === label).id });
+    if (navStep === 0) { navStep++; tap('Draw'); }
+    else if (navStep === 1 && screens === 2 && has('Meal 1')) { navStep++; send({ k: 'tap', id: nav.id + '~back' }); }
+    else if (navStep === 2 && screens === 1 && has('shown=false')) { navStep++; tap('Draw'); }
+    else if (navStep === 3 && screens === 2 && has('Meal 2')) { navStep++; tap('Close'); }
+    else if (navStep === 4 && screens === 1 && has('shown=false')) { navStep++; tap('Draw'); }
+    else if (navStep === 5) return screens === 2 && has('Meal 3');
   });
   const record = { title: 'Łódź', date: '2026-01-01T12:00:00Z' };
   let gets = 0, posts = 0;

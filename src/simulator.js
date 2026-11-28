@@ -263,12 +263,18 @@ function buildImage(n) {
   return img;
 }
 
-function placeChildren(el, kids, axis) {
+// `unbounded`: a VStack inside a vertical ScrollView. SwiftUI proposes no height there, so views that would
+// fill the free space take their own height instead (a resizable image: its width ÷ aspect ratio, a Spacer:
+// its minimum length) — growing from 0 into free space that doesn't exist left them 0 px tall.
+function placeChildren(el, kids, axis, unbounded = false) {
   let H = false, V = false;
   for (const k of kids) {
     el.appendChild(k);
     if (axis === 'v') {
-      if (k._V) { k.style.flex = k._spacer ? '1 1 0' : '1 1 0'; k.style.minHeight = k.style.minHeight || '0'; V = true; }
+      if (k._V && unbounded) {
+        k.style.flex = '0 0 auto';
+        if (k.matches('img.resizable')) k.style.height = 'auto';
+      } else if (k._V) { k.style.flex = '1 1 0'; k.style.minHeight = k.style.minHeight || '0'; V = true; }
       if (k._H) { k.style.alignSelf = 'stretch'; H = true; }
     } else {
       if (k._H) { k.style.flex = '1 1 0'; k.style.minWidth = k.style.minWidth || '0'; H = true; }
@@ -288,8 +294,11 @@ function buildStack(n, axis, ctx) {
   if (axis === 'v') el.style.alignItems = H_ALIGN[n.p.align] || 'center';
   else el.style.alignItems = V_ALIGN[n.p.align] || 'center';
   if (axis === 'v') el.style.textAlign = TEXT_ALIGN[n.p.align] || 'left';
-  const kids = flat(n.c).map(c => build(c, { ...ctx, axis, inList: false }));
-  placeChildren(el, kids, axis);
+  // a frame with a height gives the stack a height to share out again, even inside a scroll view
+  const f = mod(n, 'frame');
+  const scrollV = !!ctx.scrollV && !(f && (f.h != null || f.minH != null || typeof f.maxH === 'number'));
+  const kids = flat(n.c).map(c => build(c, { ...ctx, axis, inList: false, scrollV }));
+  placeChildren(el, kids, axis, axis === 'v' && scrollV);
   return el;
 }
 
@@ -1010,10 +1019,11 @@ function buildScroll(n, ctx) {
   const el = div('scroll' + (h ? ' h' : ''));
   el.dataset.sid = n.id;
   const content = div('scroll-content');
-  const kids = flat(n.c).map(c => build(c, { ...ctx, axis: h ? 'h' : 'v', inList: false }));
+  const kids = flat(n.c).map(c => build(c, { ...ctx, axis: h ? 'h' : 'v', inList: false, scrollV: !h }));
   for (const k of kids) {
     content.appendChild(k);
     if (!h && k._H) k.style.alignSelf = 'stretch';
+    if (!h && k.matches('img.resizable')) k.style.height = 'auto';
   }
   if (!h) content.style.gap = '8px';
   else content.style.gap = '8px';

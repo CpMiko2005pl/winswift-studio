@@ -47,6 +47,15 @@ Build iPhone apps in Swift &amp; SwiftUI on Windows — an Xcode-style IDE with 
 | **Debugger LLDB** — breakpointy na marginesie, *Continue / Step Over / Into / Out* (F6/F7/F8), zmienne, stos wywołań, konsola `(lldb)` z `po` i `p`, podgląd wartości po najechaniu. | <img src="docs/screenshots/debugger.png" width="480" alt="Debugger"> |
 | <img src="docs/screenshots/library.png" width="480" alt="Library"> | **Jak w Xcode** — Canvas z `#Preview`, podpowiedzi i błędy na żywo (SourceKit-LSP), Quick Help, Rename, Code Actions, Open Quickly, Find &amp; Replace w projekcie, Library (Views, Modifiers, Snippets, SF Symbols, Colors, Images), Edit Scheme, nawigatory, motyw jasny i ciemny, własne skróty klawiszowe. |
 
+### Nowości w 1.6.4 — biblioteki zewnętrzne (Swift Package Manager)
+
+- **File ▸ Add Package Dependencies…** jak w Xcode: wpisz adres repozytorium (albo wybierz z sugerowanych), wybierz regułę wersji (*Up to Next Major*, *Exact*, *Branch*…) i produkty. WinSwift sam sprawdza dostępne wersje i produkty pakietu.
+- Pakiety zapisują się w **`project.pbxproj` dokładnie tak jak w Xcode** — kolega z Makiem otwiera ten sam projekt z gita i Xcode pobiera te same biblioteki.
+- Przy budowaniu WinSwift pobiera i kompiluje pakiety **prawdziwym Swift Package Managerem** (też z zależnościami i modułami w C, np. `swift-algorithms`). Pierwszy raz trwa to kilka minut, potem korzysta z gotowej biblioteki. Edytor podpowiada też kod z pakietów.
+- **Kingfisher** (`KFImage`) działa w symulatorze: WinSwift podstawia zgodną wersję z tym samym API (`KFImage`, `.placeholder`, `.resizable()`, `ImageCache`, `ImagePrefetcher`…), bo oryginał wymaga UIKit. Xcode używa prawdziwego Kingfishera.
+- Zakładki jak w Xcode: *Project ▸ Package Dependencies* (lista z + i −), *Target ▸ General ▸ Frameworks, Libraries, and Embedded Content*, *Build Phases ▸ Link Binary With Libraries*, oraz *File ▸ Packages ▸ Resolve / Update to Latest / Reset Package Caches*.
+- Pakiety pobiera się przez Git — potrzebny jest Git for Windows.
+
 ### Poprawka w 1.6.3 — zdjęcia w ScrollView
 
 - Obrazek z `.resizable()` (np. `AsyncImage` z `.scaledToFit()`) wewnątrz `ScrollView { VStack { … } }` miał w symulatorze wysokość 0 i był niewidoczny. Teraz, jak w iOS, bierze wysokość z szerokości i proporcji zdjęcia. `Spacer` w przewijanej treści ma swoją minimalną długość, a w ramce o stałej wysokości (`.frame(height:)`) dalej rozpycha zawartość.

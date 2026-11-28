@@ -13,6 +13,7 @@ const { rewriteForWindows, rewriteModels, parseStrings, codeMask, stripPreviews 
 const license = require('./activation.js');   // not './license' — on Windows that finds the LICENSE file
 const updater = require('./updater');
 const xcode = require('./xcodeproj');
+const pkgs = require('./packages');
 
 const IGNORED_DIRS = new Set(['.build', '.git', '.swiftpm', 'node_modules', '.vs', '.vscode', '.idea', 'DerivedData', 'xcuserdata']);
 // Xcode's own project files: hidden from the navigator like Xcode does, and never searched for sources
@@ -867,6 +868,14 @@ async function buildSwiftUIProject(root, files, swiftVersion, preview, opts = {}
     ev('diag', { file: null, line: 0, col: 0, severity: 'error', message });
     return { ok: false };
   }
+  // Swift packages first (File ▸ Add Package Dependencies…); the canvas only uses ones a build already made
+  const packs = await ensurePackages(root, rt, { quiet, build: !quiet });
+  if (packs.error || (quiet && packs.missing)) {
+    const message = packs.error || 'Build the project once (Ctrl+B) so WinSwift can download its Swift packages.';
+    if (quiet) return { ok: false, errors: [{ message }] };
+    ev('diag', { file: null, line: 0, col: 0, severity: 'error', message });
+    return { ok: false };
+  }
   if (!quiet) ev('phase', { text: '' });
   const name = path.basename(root);
   const outDir = path.join(root, '.build', 'swiftcode');
@@ -920,7 +929,7 @@ async function buildSwiftUIProject(root, files, swiftVersion, preview, opts = {}
   }
   const exe = path.join(outDir, moduleName(name) + (preview ? (quiet ? '-Canvas' : '-Preview') : '') + '.exe');
   const args = [...(quiet ? ['-Onone'] : configFlags(root)), '-diagnostic-style=llvm', ...swiftFlags(), '-swift-version', '5', '-enable-bare-slash-regex',
-    '-I', rt, '-L', rt, '-lSwiftUI', '-module-name', moduleName(name), '-o', exe];
+    '-I', rt, '-L', rt, '-lSwiftUI', ...packs.args, '-module-name', moduleName(name), '-o', exe];
   if (!hasMain) args.push('-parse-as-library');
   args.push(...inputs);
   if (quiet) {
@@ -939,6 +948,95 @@ async function buildSwiftUIProject(root, files, swiftVersion, preview, opts = {}
 }
 
 function norm(p) { return path.resolve(p).toLowerCase(); }
+
+// ---------------------------------------------------------------- Swift packages (File ▸ Add Package Dependencies…)
+//
+// The project's packages are listed in project.pbxproj like in Xcode. A generated wrapper package (one per project,
+// in the user data folder) depends on every product the app links; SwiftPM fetches and builds it into one static
+// library against the SwiftUI for Windows runtime, and the app links that library. Packages that need UIKit are swapped
+// for WinSwift's compatible ones (runtime/Packages, see packages.js).
+
+const PACKAGES_COMPAT = path.join(__dirname, 'runtime', 'Packages');
+let compatHash = null;
+
+function compatPackagesHash() {
+  if (compatHash) return compatHash;
+  const h = crypto.createHash('sha1');
+  (function walk(d) {
+    for (const e of safeReaddirEnt(d).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (!e.name.startsWith('.')) walk(p); } else { h.update(e.name); h.update(fs.readFileSync(p)); }
+    }
+  })(PACKAGES_COMPAT);
+  return (compatHash = h.digest('hex').slice(0, 12));
+}
+
+/** git for SwiftPM and package lookups: on PATH, or the portable MinGit (then put on the tools' PATH). */
+function gitExe() {
+  const found = findOnPath('git.exe');
+  if (found) return found;
+  const local = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'MinGit', 'cmd', 'git.exe');
+  if (fs.existsSync(local)) { toolEnv.Path = path.dirname(local) + ';' + toolEnv.Path; return local; }
+  return null;
+}
+
+function packagesDir(root) {
+  return path.join(app.getPath('userData'), 'packages', crypto.createHash('sha1').update(norm(root)).digest('hex').slice(0, 12));
+}
+
+/** What the last successful package build of the project left for the compiler (nothing is built here). */
+function builtPackages(root) {
+  try { return JSON.parse(fs.readFileSync(path.join(packagesDir(root), 'winswift-link.json'), 'utf8')); } catch { return null; }
+}
+
+/**
+ * Builds the project's Swift packages when the list (or WinSwift's runtime) changed. Returns the compiler arguments the
+ * app needs — { args, stamp } — or { error }, or { missing: true } when `build` is false and they aren't built yet.
+ */
+async function ensurePackages(root, rt, { quiet = false, build = true } = {}) {
+  let list = null;
+  try { list = xcode.packages(root); } catch {}
+  const used = (list || []).filter(pk => pk.products.length);
+  if (!used.length) return { args: [], stamp: '' };
+  const tc = await toolchainInfo();
+  let manifest;
+  try { manifest = pkgs.wrapperManifest(used, PACKAGES_COMPAT); } catch (e) { return { error: e.message }; }
+  const stamp = crypto.createHash('sha1').update([manifest, rt, tc.version, compatPackagesHash()].join('\n')).digest('hex').slice(0, 16);
+  const argsOf = l => ['-I', l.importPath, ...l.xcc, l.lib];
+  const done = builtPackages(root);
+  if (done && done.stamp === stamp && fs.existsSync(done.lib)) return { args: argsOf(done), stamp };
+  if (!build) return { args: [], stamp: '', missing: true };
+  if (!gitExe() && used.some(pk => pk.kind === 'remote' && !pkgs.compatFor(pk.url))) {
+    return { error: 'Git is needed to download Swift packages. Install Git for Windows (https://git-scm.com/download/win), then build again.' };
+  }
+  const dir = packagesDir(root);
+  await fsp.mkdir(path.join(dir, 'Sources', pkgs.WRAPPER), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'Package.swift'), manifest);
+  await fsp.writeFile(path.join(dir, 'Sources', pkgs.WRAPPER, 'Packages.swift'), '// Generated by WinSwift Studio: links the app’s Swift package products.\n');
+  // a per-user Windows SDK needs its module maps for the packages' own manifests too
+  const toolsFlag = parseInt(tc.version, 10) >= 6 ? '-Xbuild-tools-swiftc' : '-Xmanifest';   // -Xmanifest is deprecated in Swift 6
+  const manifestFlags = vfsOverlay ? ['-vfsoverlay', vfsOverlay, '-Xcc', '-ivfsoverlay', '-Xcc', vfsOverlay].flatMap(f => [toolsFlag, f]) : [];
+  const args = ['build', '--build-system', 'native', '--product', pkgs.WRAPPER, '-Xswiftc', '-I', '-Xswiftc', rt,
+    ...swiftFlags().flatMap(f => ['-Xswiftc', f]), ...manifestFlags];
+  const names = used.map(pk => pk.kind === 'remote' ? pkgs.repoName(pk.url) : path.basename(pk.path)).join(', ');
+  if (!quiet) {
+    ev('phase', { text: 'Building Swift packages' });
+    ev('log', { text: `Swift packages: ${names}. A new package is downloaded and compiled once — the first build can take a few minutes.` });
+  }
+  const swift = findOnPath('swift.exe');
+  const code = quiet ? (await quietTool(swift, args, dir)).code : await runTool(swift, args, dir);
+  if (!quiet) ev('phase', { text: '' });
+  if (code !== 0) return { error: code === -1 ? 'Build cancelled.' : 'The Swift packages couldn’t be built — the build log shows why.' };
+  let info = null;
+  try { info = pkgs.linkInfo(dir); } catch {}
+  if (!info) return { error: 'The Swift packages were built, but their library wasn’t found.' };
+  const lib = path.join(dir, pkgs.WRAPPER + '.lib');
+  await fsp.copyFile(info.lib, lib);
+  const link = { stamp, importPath: info.importPath, xcc: info.xcc, lib, packages: names };
+  await fsp.writeFile(path.join(dir, 'winswift-link.json'), JSON.stringify(link, null, 1));
+  lspFilesChanged(root);
+  return { args: argsOf(link), stamp };
+}
 
 function readStringsFile(p) {
   const buf = fs.readFileSync(p);
@@ -1973,14 +2071,16 @@ async function compilationInputs(root) {
   const hasMainFile = files.some((f, i) => path.basename(f).toLowerCase() === 'main.swift' && !/^\s*@main\b/m.test(sources[i]));
   const library = !hasMainFile && (ui || files.length > 1 || sources.some(s => /^\s*@main\b/m.test(s)));
   const models = sources.map(s => ui && s.includes('@Model') ? rewriteModels(s) : null);
-  const key = crypto.createHash('sha1').update(JSON.stringify([files, ui, library, models])).digest('hex');
-  return { files, ui, library, models, key };
+  // modules of the project's Swift packages, once a build has made them
+  const packages = ui ? builtPackages(root) : null;
+  const key = crypto.createHash('sha1').update(JSON.stringify([files, ui, library, models, packages && packages.stamp])).digest('hex');
+  return { files, ui, library, models, packages, key };
 }
 
 async function writeCompileDatabase(root, inputs) {
   inputs ??= await compilationInputs(root);
   if (!inputs) return null;
-  const { files, ui, library, models, key } = inputs;
+  const { files, ui, library, models, packages, key } = inputs;
   const dir = path.join(root, '.build', 'swiftcode');
   await fsp.mkdir(dir, { recursive: true });
   xcode.ensureBuildIgnore(root);
@@ -1991,6 +2091,7 @@ async function writeCompileDatabase(root, inputs) {
     if (!rt) throw Error('SwiftUI module is unavailable');
     await ensureStubModules(rt);
     args.push('-swift-version', '5', '-enable-bare-slash-regex', '-I', rt, '-Xfrontend', '-import-module', '-Xfrontend', 'SwiftUI');
+    if (packages && packages.importPath) args.push('-I', packages.importPath, ...(packages.xcc || []));
   }
   if (library) args.push('-parse-as-library');
   // The open document uses its original URI. Peer files need the same model conformance on disk as in the editor.
@@ -2348,6 +2449,47 @@ function registerIpc() {
     const s = readProjectSettings(root);
     const proj = xcode.createProject(root, name, { ...s, info: s.info || {} });
     return proj;
+  });
+  // Swift packages: Project ▸ Package Dependencies and File ▸ Add Package Dependencies…
+  ipcMain.handle('packages:list', async (_e, root) => {
+    const list = xcode.packages(root) || [];
+    const built = builtPackages(root);
+    return {
+      hasXcodeProject: !!xcode.projectFile(root),
+      built: built ? built.packages : null,
+      suggested: pkgs.SUGGESTED,
+      packages: list.map(pk => ({
+        ...pk,
+        name: pk.kind === 'remote' ? pkgs.repoName(pk.url) : path.basename(pk.path),
+        rule: pk.kind === 'remote' ? pkgs.requirementLabel(pk.requirement) : 'Local',
+        compat: pk.kind === 'remote' && pkgs.compatFor(pk.url) ? pkgs.compatFor(pk.url).note : null,
+      })),
+    };
+  });
+  ipcMain.handle('packages:lookup', async (_e, url) => {
+    if (!toolEnv) await refreshEnv();
+    return pkgs.lookup(url, { gitExe: gitExe(), env: toolEnv });
+  });
+  ipcMain.handle('packages:add', async (_e, root, spec) => {
+    if (!xcode.projectFile(root)) {
+      const name = path.basename(root);
+      if (!fs.existsSync(path.join(root, name))) throw new Error(`Packages are kept in the Xcode project, and this folder has none. The sources must be in the folder "${name}" for WinSwift to create one.`);
+      const s = readProjectSettings(root);
+      xcode.createProject(root, name, { ...s, info: s.info || {} });
+    }
+    xcode.addPackage(root, spec);
+    return true;
+  });
+  ipcMain.handle('packages:remove', async (_e, root, id) => { xcode.removePackage(root, id); return true; });
+  // File ▸ Packages: the next build fetches again (update: newest allowed versions; reset: everything from scratch)
+  ipcMain.handle('packages:invalidate', async (_e, root, mode) => {
+    const dir = packagesDir(root);
+    if (mode === 'reset') await fsp.rm(dir, { recursive: true, force: true });
+    else {
+      if (mode === 'update') await fsp.rm(path.join(dir, 'Package.resolved'), { force: true });
+      await fsp.rm(path.join(dir, 'winswift-link.json'), { force: true });
+    }
+    return true;
   });
   ipcMain.handle('fs:reveal', (_e, p) => shell.showItemInFolder(p));
   ipcMain.handle('fs:openPath', (_e, p) => shell.openPath(p));

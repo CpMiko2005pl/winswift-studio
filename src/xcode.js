@@ -71,6 +71,7 @@ function openProjectEditor() {
 async function renderProjectEditor(host, doc) {
   const s = await projectSettings();
   const loc = await api.localizations(S.root);
+  const pk = await api.packages(S.root).catch(() => null);
   const name = S.name;
   const tabs = doc.pane === 'project' ? ['Info', 'Build Settings', 'Package Dependencies'] : ['General', 'Signing & Capabilities', 'Resource Tags', 'Info', 'Build Settings', 'Build Phases', 'Build Rules'];
   if (!tabs.includes(doc.tab)) doc.tab = tabs[0];
@@ -90,10 +91,11 @@ async function renderProjectEditor(host, doc) {
   const c = host.querySelector('#pe-content');
   const key = `${doc.pane}:${doc.tab}`;
   if (key === 'project:Info') renderProjectInfo(c, s, loc);
-  else if (key === 'target:General') renderTargetGeneral(c, s);
+  else if (key === 'project:Package Dependencies') renderPackageDependencies(c, pk);
+  else if (key === 'target:General') renderTargetGeneral(c, s, pk);
   else if (key === 'target:Info') renderTargetInfo(c, s);
   else if (doc.tab === 'Build Settings') renderBuildSettings(c, s, doc);
-  else if (key === 'target:Build Phases') renderBuildPhases(c);
+  else if (key === 'target:Build Phases') renderBuildPhases(c, pk);
   else if (key === 'target:Signing & Capabilities') {
     c.innerHTML = `<div class="pe-sec"><h4>Signing</h4><div class="pe-grid">
       <label>Automatically manage signing</label><div><input type="checkbox" checked disabled></div>
@@ -169,7 +171,13 @@ function showAddLanguageSheet(lang, loc) {
   };
 }
 
-function renderTargetGeneral(c, s) {
+// the package products the app links, as Xcode lists them under the target
+function linkedProducts(pk) {
+  return ((pk && pk.packages) || []).flatMap(p => p.products.map(x => ({ product: x.name, pkg: p })));
+}
+
+function renderTargetGeneral(c, s, pk) {
+  const products = linkedProducts(pk);
   c.innerHTML = `
     <div class="pe-sec"><h4>Supported Destinations</h4><table class="pe-table"><tr><th>Destination</th><th>SDK</th></tr><tr><td>📱 iPhone</td><td class="dim">iOS</td></tr></table></div>
     <div class="pe-sec"><h4>Minimum Deployments</h4><div class="pe-grid"><label>iOS</label><div class="dim">${esc(s.deploymentTarget || '18.0')}</div></div></div>
@@ -179,8 +187,14 @@ function renderTargetGeneral(c, s) {
       <label>Version</label><input data-k="version" value="${esc(s.version || '1.0')}">
       <label>Build</label><input data-k="build" value="${esc(s.build || '1')}">
     </div></div>
-    <div class="pe-sec"><h4>App Icons and Launch Screen</h4><div class="pe-grid"><label>App Icon</label><div class="dim">AppIcon</div><label>Launch Screen File</label><div class="dim">—</div></div></div>`;
+    <div class="pe-sec"><h4>App Icons and Launch Screen</h4><div class="pe-grid"><label>App Icon</label><div class="dim">AppIcon</div><label>Launch Screen File</label><div class="dim">—</div></div></div>
+    <div class="pe-sec"><h4>Frameworks, Libraries, and Embedded Content</h4>
+      <table class="pe-table"><tr><th>Name</th><th>Embed</th></tr>
+      ${products.length ? products.map(x => `<tr><td>📦 ${esc(x.product)} <span class="dim">— ${esc(x.pkg.name)}</span></td><td class="dim">Do Not Embed</td></tr>`).join('')
+        : '<tr><td class="dim" colspan="2">Add frameworks &amp; libraries here — Swift packages come from File ▸ Add Package Dependencies…</td></tr>'}</table>
+      <div class="pe-pm"><button id="pe-fwadd" title="Add a Swift package">+</button></div></div>`;
   c.querySelectorAll('input[data-k]').forEach(i => i.onchange = () => saveSettings({ [i.dataset.k]: i.value }));
+  c.querySelector('#pe-fwadd').onclick = () => showAddPackageSheet();
 }
 
 function renderTargetInfo(c, s) {
@@ -244,14 +258,175 @@ function renderBuildSettings(c, s, doc) {
   });
 }
 
-function renderBuildPhases(c) {
+function renderBuildPhases(c, pk) {
+  const products = linkedProducts(pk);
   const files = flattenFiles(S.tree);
   const sources = files.filter(f => /\.swift$/i.test(f.name));
   const resources = files.filter(f => /\.(strings|stringsdict|xcstrings|png|jpe?g|json|plist|ttf|otf)$/i.test(f.name) && !/\.xcassets[\\/]/i.test(f.path));
   const assets = (S.tree ? [S.tree] : []).flatMap(function find(n) { return n.type === 'dir' ? (/\.xcassets$/i.test(n.name) ? [n] : n.children.flatMap(find)) : []; });
   const list = arr => arr.map(f => `<tr><td>${fileBadge(f.name, f.type)} ${esc(f.path.slice(S.root.length + 1))}</td></tr>`).join('');
   c.innerHTML = `<div class="pe-sec"><h4>› Compile Sources (${sources.length} items)</h4><table class="pe-table">${list(sources)}</table></div>
+    <div class="pe-sec"><h4>› Link Binary With Libraries (${products.length} items)</h4><table class="pe-table">${products.map(x => `<tr><td>📦 ${esc(x.product)}</td></tr>`).join('')}</table></div>
     <div class="pe-sec"><h4>› Copy Bundle Resources (${resources.length + assets.length} items)</h4><table class="pe-table">${list([...assets, ...resources])}</table></div>`;
+}
+
+// ======================================================================== Swift packages
+
+/** Project ▸ Package Dependencies: the packages of the project, with + and − like Xcode's table. */
+function renderPackageDependencies(c, pk) {
+  const list = (pk && pk.packages) || [];
+  c.innerHTML = `<div class="pe-sec"><h4>Packages (${list.length} item${list.length === 1 ? '' : 's'})</h4>
+    <table class="pe-table" id="pe-pk"><tr><th>Name</th><th>Location</th><th>Dependency Rule</th></tr>
+    ${list.length ? list.map(p => `<tr data-id="${esc(p.id)}" title="${esc(p.compat || '')}"><td>📦 ${esc(p.name)}${p.compat ? ' <span class="pkg-badge">WinSwift</span>' : ''}</td>
+      <td class="dim">${esc(p.url || p.relativePath || '')}</td><td>${esc(p.rule)}</td></tr>`).join('')
+      : '<tr><td class="dim" colspan="3">No packages — press + to add one.</td></tr>'}
+    </table>
+    <div class="pe-pm"><button id="pe-pkadd" title="Add a Swift package">+</button><button id="pe-pkdel" title="Remove the selected package">−</button></div>
+    <p class="pe-note">Packages are saved in ${esc(S.name)}.xcodeproj like in Xcode, so Xcode on a Mac fetches the same ones. WinSwift downloads and compiles them with Swift Package Manager when you build — a new package takes a few minutes the first time.${pk && pk.built ? ` Built: ${esc(pk.built)}.` : ''}</p>
+    ${list.some(p => p.compat) ? `<p class="pe-note"><span class="pkg-badge">WinSwift</span> ${esc(list.find(p => p.compat).compat)}</p>` : ''}</div>`;
+  let sel = null;
+  c.querySelectorAll('#pe-pk tr[data-id]').forEach(tr => tr.onclick = () => {
+    c.querySelectorAll('#pe-pk tr').forEach(x => x.classList.remove('sel'));
+    tr.classList.add('sel'); sel = tr.dataset.id;
+  });
+  c.querySelector('#pe-pkadd').onclick = () => showAddPackageSheet();
+  c.querySelector('#pe-pkdel').onclick = async () => {
+    const p = list.find(x => x.id === sel);
+    if (!p) { toast('Select a package'); return; }
+    const r = await api.confirm(`Remove the package “${p.name}”?`, `Its products (${p.products.map(x => x.name).join(', ') || '—'}) will no longer be linked to ${S.name}. Code that imports them stops building.`, ['Remove', 'Cancel']);
+    if (r !== 0) return;
+    try { await api.removePackage(S.root, p.id); } catch (e) { toast(errText(e), 6000); return; }
+    rerenderCustom();
+  };
+}
+
+const errText = e => String(e && e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+
+const PKG_RULES = [
+  ['upToNextMajorVersion', 'Up to Next Major Version'], ['upToNextMinorVersion', 'Up to Next Minor Version'],
+  ['versionRange', 'Range of Versions'], ['exactVersion', 'Exact Version'], ['branch', 'Branch'], ['revision', 'Commit'],
+];
+
+/** File ▸ Add Package Dependencies…: find a package by URL (or pick a suggested one), choose the rule and products. */
+async function showAddPackageSheet(prefill) {
+  if (!S.root) { toast('Open a project first'); return; }
+  if (S.isPackage) { toast('Add dependencies to Package.swift in a Swift package'); return; }
+  const pk = await api.packages(S.root).catch(() => ({ suggested: [] }));
+  const ov = document.createElement('div');
+  ov.className = 'overlay show';
+  ov.innerHTML = `<div class="sheet pkg-sheet"><div class="sheet-title">Add Package Dependencies</div>
+    <div class="pkg-body">
+      <div class="pkg-side"><div class="pkg-h">Suggested Packages</div>
+        ${(pk.suggested || []).map((x, i) => `<div class="pkg-sug" data-i="${i}"><b>📦 ${esc(x.name)}</b><span>${esc(x.summary)}</span></div>`).join('')}</div>
+      <div class="pkg-main">
+        <input id="pkg-url" placeholder="Search or Enter Package URL" spellcheck="false" value="${esc(prefill || '')}">
+        <div id="pkg-info" class="pkg-info dim">Enter a Git repository URL (e.g. https://github.com/onevcat/Kingfisher.git) and press Enter.</div>
+        <div class="pe-grid pkg-grid" id="pkg-form" hidden>
+          <label>Dependency Rule</label><div class="pkg-rule"><select id="pkg-rule">${PKG_RULES.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+            <input id="pkg-v1" spellcheck="false"><span id="pkg-dash" hidden>–</span><input id="pkg-v2" spellcheck="false" hidden></div>
+          <label>Add to Project</label><div>${esc(S.name)}</div>
+          <label>Products</label><div id="pkg-products"></div>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-buttons"><button class="btn" data-x="cancel">Cancel</button><div class="spacer"></div><button class="btn primary" id="pkg-add" disabled>Add Package</button></div></div>`;
+  document.body.appendChild(ov);
+  const $o = s => ov.querySelector(s);
+  const url = $o('#pkg-url'), info = $o('#pkg-info'), rule = $o('#pkg-rule'), v1 = $o('#pkg-v1'), v2 = $o('#pkg-v2');
+  let found = null, seq = 0;
+  const close = () => ov.remove();
+  $o('[data-x=cancel]').onclick = close;
+  ov.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+
+  const ruleFields = () => {
+    const k = rule.value;
+    const latest = found ? found.latest : '';
+    v2.hidden = $o('#pkg-dash').hidden = k !== 'versionRange';
+    const want = { upToNextMajorVersion: latest, upToNextMinorVersion: latest, exactVersion: latest, versionRange: latest,
+      branch: found && (found.branches.includes('main') ? 'main' : found.branches[0]) || 'main', revision: '' }[k];
+    if (!v1.dataset.touched || v1.dataset.rule !== k) { v1.value = want || ''; v1.dataset.rule = k; delete v1.dataset.touched; }
+    if (k === 'versionRange' && !v2.value && latest) v2.value = `${(parseInt(latest, 10) || 0) + 1}.0.0`;
+    v1.placeholder = k === 'branch' ? 'main' : k === 'revision' ? 'commit hash' : '1.0.0';
+    v1.setAttribute('list', /Version|Range/.test(k) ? 'pkg-versions' : 'pkg-branches');
+    validate();
+  };
+  const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+  const chosen = () => [...ov.querySelectorAll('#pkg-products input[type=checkbox]:checked')].map(i => i.value)
+    .concat(($o('#pkg-products input[type=text]')?.value || '').split(',').map(x => x.trim()).filter(Boolean));
+  const requirement = () => {
+    const k = rule.value, a = v1.value.trim(), b = v2.value.trim();
+    if (k === 'upToNextMajorVersion' || k === 'upToNextMinorVersion') return VERSION.test(a) ? { kind: k, minimumVersion: a } : null;
+    if (k === 'exactVersion') return VERSION.test(a) ? { kind: k, version: a } : null;
+    if (k === 'versionRange') return VERSION.test(a) && VERSION.test(b) ? { kind: k, minimumVersion: a, maximumVersion: b } : null;
+    if (k === 'branch') return a ? { kind: k, branch: a } : null;
+    return /^[0-9a-f]{7,40}$/i.test(a) ? { kind: k, revision: a } : null;
+  };
+  const validate = () => { $o('#pkg-add').disabled = !(found && requirement() && chosen().length); };
+
+  const lookup = async () => {
+    const u = url.value.trim();
+    if (!u) return;
+    const my = ++seq;
+    found = null; $o('#pkg-form').hidden = true; validate();
+    info.className = 'pkg-info dim';
+    info.textContent = `Fetching ${u}…`;
+    const r = await api.packageLookup(u).catch(e => ({ ok: false, error: errText(e) }));
+    if (my !== seq) return;
+    if (!r.ok) { info.className = 'pkg-info err'; info.textContent = r.error; return; }
+    found = r;
+    const already = (pk.packages || []).find(p => p.url && p.url.replace(/\.git$/i, '').toLowerCase() === r.url.replace(/\.git$/i, '').toLowerCase());
+    info.className = 'pkg-info';
+    info.innerHTML = `<b>📦 ${esc(r.name)}</b> <span class="dim">${esc(r.url)}</span><br>${r.latest ? `Latest version: <b>${esc(r.latest)}</b>` : 'No release versions — use a branch or a commit.'}
+      ${r.compat ? `<br><span class="pkg-badge">WinSwift</span> <span class="dim">${esc(r.compat)}</span>` : ''}
+      ${already ? `<br><span class="dim">The project already has this package — adding links the products you check.</span>` : ''}`;
+    $o('#pkg-products').innerHTML = r.productsKnown
+      ? r.products.map((p, i) => `<label class="pkg-prod"><input type="checkbox" value="${esc(p)}" ${i === 0 || r.products.length === 1 ? 'checked' : ''}> ${esc(p)}</label>`).join('')
+      : `<input type="text" placeholder="Product name(s), comma-separated" spellcheck="false" value="${esc(r.name)}"><div class="dim pkg-hint">WinSwift couldn’t read this package’s products — type the library name(s) from its Package.swift.</div>`;
+    ov.querySelectorAll('#pkg-products input').forEach(i => { i.onchange = validate; i.oninput = validate; });
+    let dl = $o('#pkg-lists');
+    if (!dl) { dl = document.createElement('div'); dl.id = 'pkg-lists'; ov.appendChild(dl); }
+    dl.innerHTML = `<datalist id="pkg-versions">${r.versions.map(v => `<option value="${esc(v)}">`).join('')}</datalist><datalist id="pkg-branches">${r.branches.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+    rule.value = r.latest ? 'upToNextMajorVersion' : 'branch';
+    delete v1.dataset.touched;
+    $o('#pkg-form').hidden = false;
+    ruleFields();
+  };
+
+  url.addEventListener('keydown', e => { if (e.key === 'Enter') lookup(); });
+  url.addEventListener('change', lookup);
+  rule.onchange = ruleFields;
+  v1.oninput = () => { v1.dataset.touched = '1'; validate(); };
+  v2.oninput = validate;
+  ov.querySelectorAll('.pkg-sug').forEach(el => el.onclick = () => {
+    ov.querySelectorAll('.pkg-sug').forEach(x => x.classList.remove('sel'));
+    el.classList.add('sel');
+    url.value = pk.suggested[+el.dataset.i].url;
+    lookup();
+  });
+  $o('#pkg-add').onclick = async () => {
+    const req = requirement(), products = chosen();
+    if (!found || !req || !products.length) return;
+    $o('#pkg-add').disabled = true;
+    try {
+      await api.addPackage(S.root, { url: found.url, requirement: req, products });
+    } catch (e) { info.className = 'pkg-info err'; info.textContent = errText(e); validate(); return; }
+    close();
+    await loadTree(); renderTree();
+    if (activeDoc()?.key === 'swiftcode-project:' + S.root) rerenderCustom();
+    toast(L(`Dodano pakiet ${found.name} (${products.join(', ')}). Teraz go pobieram i kompiluję — pierwszy raz trwa to kilka minut.`,
+      `Added ${found.name} (${products.join(', ')}). Fetching and building it now — the first time takes a few minutes.`), 7000);
+    runAction('build');
+  };
+  if (prefill) lookup(); else url.focus();
+}
+
+/** File ▸ Packages ▸ Resolve / Update / Reset: the next build fetches the packages again. */
+async function packagesCommand(mode) {
+  if (!S.root || S.isPackage) return;
+  const pk = await api.packages(S.root).catch(() => null);
+  if (!pk || !pk.packages.length) { toast(L('Ten projekt nie ma pakietów Swift.', 'This project has no Swift packages.')); return; }
+  await api.invalidatePackages(S.root, mode);
+  runAction('build');
 }
 
 // ======================================================================== asset catalog editor

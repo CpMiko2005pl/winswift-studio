@@ -2710,6 +2710,13 @@ function menuTemplate(name) {
       { id: 'add-files', label: S.root ? `Add Files to “${S.name}”…` : 'Add Files…', accel: 'CmdOrCtrl+Alt+A', enabled: hasProj },
       { id: 'create-xcodeproj', label: 'Create Xcode Project (.xcodeproj)…', enabled: hasProj && !S.isPackage },
       { type: 'separator' },
+      { id: 'add-package', label: 'Add Package Dependencies…', enabled: hasProj && !S.isPackage },
+      { label: 'Packages', submenu: [
+        { id: 'pkg-resolve', label: 'Resolve Package Versions', enabled: hasProj && !S.isPackage },
+        { id: 'pkg-update', label: 'Update to Latest Package Versions', enabled: hasProj && !S.isPackage },
+        { id: 'pkg-reset', label: 'Reset Package Caches', enabled: hasProj && !S.isPackage },
+      ] },
+      { type: 'separator' },
       { id: 'open', label: 'Open Folder…', accel: 'CmdOrCtrl+O' },
       { id: 'open-file', label: 'Open File…', accel: 'CmdOrCtrl+Shift+Alt+O' },
       { label: 'Open Recent', submenu: recent.length ? recent : [{ id: 'none', label: 'No Recent Projects', enabled: false }] },
@@ -2951,6 +2958,10 @@ const COMMANDS = {
       await loadTree(); renderTree();
     } catch (e) { toast(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 7000); }
   },
+  'add-package': () => showAddPackageSheet(),
+  'pkg-resolve': () => packagesCommand('resolve'),
+  'pkg-update': () => packagesCommand('update'),
+  'pkg-reset': () => packagesCommand('reset'),
   'save': () => saveDoc(activeDoc()),
   'save-all': saveAll,
   'revert': async () => { const d = activeDoc(); if (!d) return; const r = await api.read(d.path); d.model.setValue(r.content); d.saved = d.model.getAlternativeVersionId(); onDocChanged(d); },

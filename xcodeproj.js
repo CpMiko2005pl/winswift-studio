@@ -89,7 +89,8 @@ const list = (d, key) => { const v = field(d, key); return v && v.type === 'arra
 /** How Xcode writes a value: bare when it can, quoted otherwise. */
 function q(v) {
   v = String(v);
-  return /^[A-Za-z0-9_$/.:-]+$/.test(v) ? v : '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n') + '"';
+  // `//` and `/*` would start a comment, so URLs are always quoted (as Xcode writes repositoryURL)
+  return /^[A-Za-z0-9_$/.:-]+$/.test(v) && !/\/[/*]/.test(v) ? v : '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n') + '"';
 }
 
 const norm = p => path.resolve(p).toLowerCase();
@@ -819,4 +820,167 @@ ${projectCfg(true)}${projectCfg(false)}${targetCfg(true)}${targetCfg(false)}/* E
   return proj;
 }
 
-module.exports = { parse, load, projectFile, projectFileFor, appSources, unreferencedSources, readSettings, writeSettings, addPath, removePath, renamePath, createProject, ensureBuildIgnore, writeGitignore, q };
+// ------------------------------------------------------------------ Swift packages (File ▸ Add Package Dependencies…)
+//
+// Stored like Xcode stores them: an XCRemoteSwiftPackageReference (URL + dependency rule) listed in the project's
+// packageReferences, one XCSwiftPackageProductDependency per product in the app target's packageProductDependencies,
+// and a PBXBuildFile for each product in the target's Frameworks phase ("Frameworks, Libraries, and Embedded Content").
+
+const REQUIREMENT_KEYS = ['branch', 'kind', 'maximumVersion', 'minimumVersion', 'revision', 'version'];
+
+function packageList(p) {
+  const out = [];
+  for (const refId of list(p.project.dict, 'packageReferences')) {
+    const o = p.objects.get(refId);
+    if (!o) continue;
+    if (o.isa === 'XCRemoteSwiftPackageReference') {
+      const requirement = {};
+      const r = field(o.dict, 'requirement');
+      if (r && r.type === 'dict') for (const e of r.entries) if (e.value.type === 'str') requirement[e.key] = e.value.value;
+      out.push({ id: refId, kind: 'remote', url: str(o.dict, 'repositoryURL') || '', requirement, products: [] });
+    } else if (o.isa === 'XCLocalSwiftPackageReference') {
+      const rel = str(o.dict, 'relativePath') || '';
+      out.push({ id: refId, kind: 'local', relativePath: rel, path: path.resolve(p.projectDir, rel), products: [] });
+    }
+  }
+  const t = appTarget(p);
+  if (t) for (const depId of list(t.dict, 'packageProductDependencies')) {
+    const d = p.objects.get(depId);
+    if (!d || d.isa !== 'XCSwiftPackageProductDependency') continue;
+    const ref = str(d.dict, 'package');
+    // a product of a local package can be listed without `package` (Xcode links it by name)
+    const pkg = out.find(x => x.id === ref) || (!ref && out.find(x => x.kind === 'local'));
+    if (pkg) pkg.products.push({ id: depId, name: str(d.dict, 'productName') || '' });
+  }
+  return out;
+}
+
+/** The project's Swift packages with the products the app target links; null without an Xcode project. */
+function packages(root) {
+  const pbx = projectFile(root);
+  if (!pbx) return null;
+  try { return packageList(load(pbx)); } catch { return null; }
+}
+
+/** Adds items to an array of `owner` (creating the key when the object doesn't have it yet). One edit per array. */
+function arrayItemsEdit(p, owner, key, items) {
+  if (!items.length) return null;
+  const node = field(owner.dict, key);
+  if (node && node.type === 'array') {
+    const close = node.end - 1;
+    const ls = lineStart(p.text, close);
+    if (p.text.slice(ls, close).trim() === '') {
+      const ind = indentOf(p.text, close) + '\t';
+      return [ls, ls, items.map(i => `${ind}${i},${p.eol}`).join('')];
+    }
+    const keyIndent = indentOf(p.text, node.start);
+    const all = [...node.items.map(it => p.text.slice(it.start, it.end)), ...items];
+    return [node.start, node.end, `(${p.eol}${all.map(x => `${keyIndent}\t${x},${p.eol}`).join('')}${keyIndent})`];
+  }
+  // a new key, placed among the others in Xcode's alphabetical order
+  const entries = owner.dict.entries;
+  const ind = entries.length ? indentOf(p.text, entries[0].start) : indentOf(p.text, owner.dict.start) + '\t';
+  const next = entries.find(e => e.key !== 'isa' && e.key.localeCompare(key) > 0);
+  const at = next ? lineStart(p.text, next.start) : lineStart(p.text, owner.dict.end - 1);
+  return [at, at, `${ind}${key} = (${p.eol}${items.map(i => `${ind}\t${i},${p.eol}`).join('')}${ind});${p.eol}`];
+}
+
+/** Inserts objects into their sections, one edit per section. */
+function sectionEdits(p, objects) {
+  const by = new Map();
+  for (const [isa, text] of objects) by.set(isa, [...(by.get(isa) || []), text]);
+  return [...by].map(([isa, texts]) => sectionInsert(p, isa, texts.join(`${p.eol}\t\t`)));
+}
+
+const sameRepo = (a, b) => require('./packages').repoKey(a) === require('./packages').repoKey(b);
+
+/**
+ * Adds a remote package and links `products` to the app target, like Xcode's Add Package. Adding a package the project
+ * already has links the products that aren't linked yet and keeps its dependency rule unless `requirement` is given.
+ */
+function addPackage(root, { url, requirement, products }) {
+  const pbx = projectFile(root);
+  if (!pbx) throw new Error('The project has no .xcodeproj yet');
+  const p = load(pbx);
+  const t = appTarget(p);
+  if (!t) throw new Error('The Xcode project has no app target');
+  const E = p.eol;
+  const used = new Set();
+  const edits = [], objects = [];
+  const name = require('./packages').repoName(url);
+  const refComment = `XCRemoteSwiftPackageReference "${name}"`;
+  const reqText = req => `{${E}${REQUIREMENT_KEYS.filter(k => req[k] != null && req[k] !== '').map(k => `\t\t\t\t${k} = ${q(req[k])};${E}`).join('')}\t\t\t}`;
+  const existing = packageList(p).find(x => x.kind === 'remote' && sameRepo(x.url, url));
+  let refId;
+  if (existing) {
+    refId = existing.id;
+    const r = field(p.objects.get(refId).dict, 'requirement');
+    if (requirement && r) edits.push([r.start, r.end, reqText(requirement)]);
+  } else {
+    if (!requirement) throw new Error('A dependency rule is needed for a new package');
+    refId = newId(p, used);
+    objects.push(['XCRemoteSwiftPackageReference', `${refId} /* ${refComment} */ = {${E}\t\t\tisa = XCRemoteSwiftPackageReference;${E}\t\t\trepositoryURL = ${q(url)};${E}\t\t\trequirement = ${reqText(requirement)};${E}\t\t};`]);
+    edits.push(arrayItemsEdit(p, p.project, 'packageReferences', [`${refId} /* ${refComment} */`]));
+  }
+  const linked = new Set((existing ? existing.products : []).map(x => x.name));
+  const fresh = [...new Set(products)].filter(n => n && !linked.has(n));
+  const depItems = [], fileItems = [];
+  for (const prod of fresh) {
+    const depId = newId(p, used), bfId = newId(p, used);
+    objects.push(['XCSwiftPackageProductDependency', `${depId} /* ${prod} */ = {${E}\t\t\tisa = XCSwiftPackageProductDependency;${E}\t\t\tpackage = ${refId} /* ${refComment} */;${E}\t\t\tproductName = ${q(prod)};${E}\t\t};`]);
+    objects.push(['PBXBuildFile', `${bfId} /* ${prod} in Frameworks */ = {isa = PBXBuildFile; productRef = ${depId} /* ${prod} */; };`]);
+    depItems.push(`${depId} /* ${prod} */`);
+    fileItems.push(`${bfId} /* ${prod} in Frameworks */`);
+  }
+  if (fileItems.length) {
+    const fw = phase(p, t, 'PBXFrameworksBuildPhase');
+    if (fw) edits.push(arrayItemsEdit(p, fw, 'files', fileItems));
+    else {
+      const fwId = newId(p, used);
+      objects.push(['PBXFrameworksBuildPhase', `${fwId} /* Frameworks */ = {${E}\t\t\tisa = PBXFrameworksBuildPhase;${E}\t\t\tbuildActionMask = 2147483647;${E}\t\t\tfiles = (${E}${fileItems.map(i => `\t\t\t\t${i},${E}`).join('')}\t\t\t);${E}\t\t\trunOnlyForDeploymentPostprocessing = 0;${E}\t\t};`]);
+      edits.push(arrayItemsEdit(p, t, 'buildPhases', [`${fwId} /* Frameworks */`]));
+    }
+    edits.push(arrayItemsEdit(p, t, 'packageProductDependencies', depItems));
+  }
+  edits.push(...sectionEdits(p, objects));
+  const real = edits.filter(Boolean);
+  if (!real.length) return packageList(p);
+  const text = apply(p.text, real);
+  save(p, text);
+  return packageList(load(pbx));
+}
+
+/** Removes a package (by id or URL) with its products, like selecting it in Package Dependencies and pressing −. */
+function removePackage(root, key) {
+  const pbx = projectFile(root);
+  if (!pbx) throw new Error('The project has no .xcodeproj');
+  const p = load(pbx);
+  const pkg = packageList(p).find(x => x.id === key || (x.url && key && sameRepo(x.url, key)));
+  if (!pkg) return packageList(p);
+  const ids = new Set([pkg.id]);
+  for (const o of p.objects.values()) if (o.isa === 'XCSwiftPackageProductDependency' && str(o.dict, 'package') === pkg.id) ids.add(o.id);
+  for (const prod of pkg.products) ids.add(prod.id);
+  for (const o of p.objects.values()) if (o.isa === 'PBXBuildFile' && ids.has(str(o.dict, 'productRef'))) ids.add(o.id);
+  const edits = [];
+  for (const id of ids) { const e = p.objects.get(id).entry; edits.push([lineStart(p.text, e.start), lineEnd(p.text, e.end), '']); }
+  // references to them in arrays (one item per line, as Xcode writes non-empty arrays)
+  const owners = [p.project, ...targets(p), ...[...p.objects.values()].filter(o => o.isa === 'PBXFrameworksBuildPhase')];
+  for (const o of owners) for (const key of ['packageReferences', 'packageProductDependencies', 'files']) {
+    const node = field(o.dict, key);
+    if (!node || node.type !== 'array') continue;
+    for (const it of node.items) {
+      if (!ids.has(it.value)) continue;
+      const ls = lineStart(p.text, it.start), le = lineEnd(p.text, it.end);
+      const rest = p.text.slice(it.end, le).replace(/\/\*.*?\*\//g, '').trim();
+      if (p.text.slice(ls, it.start).trim() === '' && /^,?$/.test(rest)) edits.push([ls, le, '']);
+    }
+  }
+  let text = apply(p.text, edits);
+  // drop sections left empty, as Xcode does
+  text = text.replace(/\/\* Begin (\w+) section \*\/\r?\n\/\* End \1 section \*\/\r?\n(\r?\n)?/g, '');
+  save(p, text);
+  return packageList(load(pbx));
+}
+
+module.exports = { parse, load, projectFile, projectFileFor, appSources, unreferencedSources, readSettings, writeSettings, addPath, removePath, renamePath, createProject, ensureBuildIgnore, writeGitignore, q,
+  packages, addPackage, removePackage };
